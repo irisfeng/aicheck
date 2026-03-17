@@ -1,11 +1,7 @@
-import { SignJWT, jwtVerify } from "jose";
+import jwt from "jsonwebtoken";
 
 function getAuthSecret() {
   return process.env.AUTH_SECRET || process.env.JWT_SECRET || "aicheck-dev-secret";
-}
-
-function getAuthSecretBytes() {
-  return new TextEncoder().encode(getAuthSecret());
 }
 
 export function configuredUsers() {
@@ -34,15 +30,18 @@ function sanitizeUser(user) {
 }
 
 export async function createToken(user) {
-  return new SignJWT({
-    username: user.username,
-    role: user.role,
-    displayName: user.displayName,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(process.env.AUTH_TOKEN_TTL ?? "12h")
-    .sign(getAuthSecretBytes());
+  return jwt.sign(
+    {
+      username: user.username,
+      role: user.role,
+      displayName: user.displayName,
+    },
+    getAuthSecret(),
+    {
+      algorithm: "HS256",
+      expiresIn: process.env.AUTH_TOKEN_TTL ?? "12h",
+    },
+  );
 }
 
 export async function login(username, password) {
@@ -66,7 +65,7 @@ export async function verifyToken(token) {
   if (!token) return null;
 
   try {
-    const { payload } = await jwtVerify(token, getAuthSecretBytes());
+    const payload = jwt.verify(token, getAuthSecret());
     if (
       typeof payload.username !== "string" ||
       typeof payload.role !== "string" ||
