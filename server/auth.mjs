@@ -1,8 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { SignJWT, jwtVerify } from "jose";
 
-const sessionStore = new Map();
+function getAuthSecret() {
+  return process.env.AUTH_SECRET || process.env.JWT_SECRET || "aicheck-dev-secret";
+}
 
-function configuredUsers() {
+function getAuthSecretBytes() {
+  return new TextEncoder().encode(getAuthSecret());
+}
+
+export function configuredUsers() {
   return [
     {
       username: process.env.DEMO_OPERATOR_USERNAME ?? "operator",
@@ -27,7 +33,19 @@ function sanitizeUser(user) {
   };
 }
 
-export function login(username, password) {
+export async function createToken(user) {
+  return new SignJWT({
+    username: user.username,
+    role: user.role,
+    displayName: user.displayName,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(process.env.AUTH_TOKEN_TTL ?? "12h")
+    .sign(getAuthSecretBytes());
+}
+
+export async function login(username, password) {
   const user = configuredUsers().find(
     (entry) => entry.username === username && entry.password === password,
   );
@@ -36,22 +54,39 @@ export function login(username, password) {
     return null;
   }
 
-  const token = randomUUID();
-  sessionStore.set(token, sanitizeUser(user));
+  const safeUser = sanitizeUser(user);
+  const token = await createToken(safeUser);
   return {
     token,
-    user: sanitizeUser(user),
+    user: safeUser,
   };
 }
 
-export function getSession(token) {
+export async function verifyToken(token) {
   if (!token) return null;
-  return sessionStore.get(token) ?? null;
+
+  try {
+    const { payload } = await jwtVerify(token, getAuthSecretBytes());
+    if (
+      typeof payload.username !== "string" ||
+      typeof payload.role !== "string" ||
+      typeof payload.displayName !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      username: payload.username,
+      role: payload.role,
+      displayName: payload.displayName,
+    };
+  } catch {
+    return null;
+  }
 }
 
-export function logout(token) {
-  if (!token) return;
-  sessionStore.delete(token);
+export function logout() {
+  return { ok: true };
 }
 
 export function readBearerToken(req) {
@@ -59,12 +94,13 @@ export function readBearerToken(req) {
   if (!authorization.startsWith("Bearer ")) {
     return "";
   }
+
   return authorization.slice("Bearer ".length).trim();
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const token = readBearerToken(req);
-  const user = getSession(token);
+  const user = await verifyToken(token);
 
   if (!user) {
     return res.status(401).json({
@@ -74,4 +110,8 @@ export function requireAuth(req, res, next) {
 
   req.auth = { token, user };
   next();
+}
+
+export function isAuthSecretConfigured() {
+  return Boolean(process.env.AUTH_SECRET || process.env.JWT_SECRET);
 }

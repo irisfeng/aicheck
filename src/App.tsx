@@ -4,9 +4,11 @@ import type {
   AnalysisResponse,
   AuthRole,
   AuthUser,
+  CaseSummary,
   ChecklistRecord,
   ReviewItemResult,
   ReviewStatus,
+  UploadedObject,
 } from "./types";
 
 const checklistItems = checklistPayload.items as ChecklistRecord[];
@@ -33,6 +35,70 @@ const roleLabel: Record<AuthRole, string> = {
   expert: "专家人工审核",
 };
 
+function buildPendingItem(item: ChecklistRecord): ReviewItemResult {
+  return {
+    code: item.code,
+    status: "pending",
+    confidence: 0,
+    rationale: "尚未运行分析。",
+    basis: ["尚未生成依据。"],
+    remediation: "暂无。",
+    referenceMethod: "暂无。",
+    evidenceFiles: [],
+    nextAction: "上传材料后点击开始分析。",
+  };
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return "刚刚";
+
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function computeSummary(items: ReviewItemResult[], overview: string) {
+  const mandatoryCodes = new Set(
+    checklistItems.filter((item) => item.mandatory).map((item) => item.code),
+  );
+  const blockerCount = items.filter(
+    (item) => mandatoryCodes.has(item.code) && item.status === "fail",
+  ).length;
+  const unresolvedCount = items.filter((item) =>
+    ["insufficient_evidence", "manual_review_required", "pending"].includes(item.status),
+  ).length;
+  const mandatoryPassCount = items.filter(
+    (item) => mandatoryCodes.has(item.code) && item.status === "pass",
+  ).length;
+
+  let recommendedDecision = "可进入人工终审";
+  if (blockerCount > 0) {
+    recommendedDecision = "建议驳回";
+  } else if (
+    items.some((item) =>
+      ["insufficient_evidence", "manual_review_required"].includes(item.status),
+    )
+  ) {
+    recommendedDecision = "待补件 / 待人工复核";
+  }
+
+  return {
+    recommendedDecision,
+    blockerCount,
+    unresolvedCount,
+    mandatoryPassCount,
+    totalMandatoryCount: mandatoryCodes.size,
+    overview,
+  };
+}
+
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -48,6 +114,7 @@ function App() {
   );
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingReview, setIsSavingReview] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<
     "all" | "mandatory" | "blockers" | "unresolved"
@@ -59,6 +126,9 @@ function App() {
   const [selectedCode, setSelectedCode] = useState<string>(
     checklistItems[0]?.code ?? "",
   );
+  const [caseHistory, setCaseHistory] = useState<CaseSummary[]>([]);
+  const [casesLoading, setCasesLoading] = useState(false);
+  const [casesError, setCasesError] = useState("");
 
   const canExpertReview = authUser?.role === "expert";
 
@@ -114,6 +184,60 @@ function App() {
     };
   }, [authToken]);
 
+  useEffect(() => {
+    if (!authToken || !authUser) {
+      setCaseHistory([]);
+      setCasesError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCases() {
+      setCasesLoading(true);
+      setCasesError("");
+
+      try {
+        const response = await fetch("/api/cases", {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+        const payload = (await response.json()) as
+          | { cases: CaseSummary[] }
+          | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in payload && payload.error
+              ? payload.error
+              : "读取案件列表失败。",
+          );
+        }
+
+        if (!cancelled) {
+          setCaseHistory(payload.cases);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setCasesError(
+            loadError instanceof Error ? loadError.message : "读取案件列表失败。",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setCasesLoading(false);
+        }
+      }
+    }
+
+    loadCases();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, authUser]);
+
   const mergedItems = checklistItems.map((item) => {
     const fromAnalysis = analysis?.items.find((entry) => entry.code === item.code);
     const fromManual = manualOverrides[item.code];
@@ -165,6 +289,178 @@ function App() {
       item.status === "insufficient_evidence",
   ).length;
 
+  async function refreshCases() {
+    if (!authToken || !authUser) return;
+
+    try {
+      const response = await fetch("/api/cases", {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const payload = (await response.json()) as { cases?: CaseSummary[] };
+      if (response.ok && Array.isArray(payload.cases)) {
+        setCaseHistory(payload.cases);
+      }
+    } catch {
+      // Keep the current list if refresh fails.
+    }
+  }
+
+  async function uploadFilesToObjectStorage(): Promise<UploadedObject[] | null> {
+    if (files.length === 0) {
+      return [];
+    }
+
+    const response = await fetch("/api/uploads/sign", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        caseId: analysis?.caseId || "draft",
+        files: files.map((file) => ({
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+        })),
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      const message = String(payload?.error || "");
+      if (message.includes("R2")) {
+        return null;
+      }
+
+      throw new Error(message || "生成上传地址失败。");
+    }
+
+    const uploads = Array.isArray(payload.uploads) ? payload.uploads : [];
+    await Promise.all(
+      uploads.map(async (target, index) => {
+        const file = files[index];
+        const uploadResponse = await fetch(target.uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": target.mimeType || file.type || "application/octet-stream",
+          },
+          body: file,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(`文件上传失败：${file.name}`);
+        }
+      }),
+    );
+
+    return uploads.map((target) => ({
+      fileName: target.fileName,
+      mimeType: target.mimeType,
+      size: target.size,
+      objectKey: target.objectKey,
+    }));
+  }
+
+  function buildReviewSnapshot(overrides: Record<string, ReviewItemResult>) {
+    if (!analysis || !authUser) return null;
+
+    const nextItems = checklistItems.map((item) => {
+      return (
+        overrides[item.code] ??
+        analysis.items.find((entry) => entry.code === item.code) ??
+        buildPendingItem(item)
+      );
+    });
+
+    const nextOverview =
+      Object.keys(overrides).length > 0
+        ? "当前案件已包含专家人工覆盖，请优先以最新复核结果为准。"
+        : analysis.summary.overview;
+
+    return {
+      ...analysis,
+      caseName,
+      notes,
+      actor: authUser,
+      items: nextItems,
+      summary: computeSummary(nextItems, nextOverview),
+    };
+  }
+
+  async function persistReviewSnapshot(overrides: Record<string, ReviewItemResult>) {
+    if (!analysis?.caseId || !authUser) return;
+
+    const snapshot = buildReviewSnapshot(overrides);
+    if (!snapshot) return;
+
+    setIsSavingReview(true);
+    try {
+      const response = await fetch(`/api/cases/${analysis.caseId}/review`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          caseName,
+          notes,
+          review: snapshot,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "保存人工复核结果失败。");
+      }
+
+      setAnalysis({
+        ...snapshot,
+        caseId: payload.caseId ?? analysis.caseId,
+        createdAt: payload.createdAt ?? analysis.createdAt,
+        updatedAt: payload.updatedAt ?? analysis.updatedAt,
+      });
+      setManualOverrides({});
+      await refreshCases();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : "保存人工复核结果失败。",
+      );
+    } finally {
+      setIsSavingReview(false);
+    }
+  }
+
+  async function loadCase(caseId: string) {
+    setError("");
+
+    try {
+      const response = await fetch(`/api/cases/${caseId}`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取案件详情失败。");
+      }
+
+      const nextAnalysis = payload as AnalysisResponse;
+      setAnalysis(nextAnalysis);
+      setManualOverrides({});
+      setCaseName(nextAnalysis.caseName);
+      setNotes(nextAnalysis.notes ?? "");
+      setFiles([]);
+      if (nextAnalysis.items?.[0]?.code) {
+        setSelectedCode(nextAnalysis.items[0].code);
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "读取案件详情失败。");
+    }
+  }
+
   async function handleLogin() {
     setAuthError("");
     setAuthLoading(true);
@@ -210,6 +506,9 @@ function App() {
       setAuthUser(null);
       setAnalysis(null);
       setManualOverrides({});
+      setCaseHistory([]);
+      setFiles([]);
+      setCasesError("");
       window.localStorage.removeItem(sessionStorageKey);
     }
   }
@@ -219,29 +518,56 @@ function App() {
     setIsSubmitting(true);
 
     try {
-      const formData = new FormData();
-      formData.append("caseName", caseName);
-      formData.append("notes", notes);
-      files.forEach((file) => formData.append("files", file));
+      let response;
+      const uploadedFiles = await uploadFilesToObjectStorage();
 
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: formData,
-      });
+      if (uploadedFiles) {
+        response = await fetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            caseName,
+            notes,
+            caseId: analysis?.caseId,
+            uploadedFiles,
+          }),
+        });
+      } else {
+        const formData = new FormData();
+        formData.append("caseName", caseName);
+        formData.append("notes", notes);
+        if (analysis?.caseId) {
+          formData.append("caseId", analysis.caseId);
+        }
+        files.forEach((file) => formData.append("files", file));
+
+        response = await fetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: formData,
+        });
+      }
 
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? "分析失败，请稍后重试。");
       }
 
-      setAnalysis(payload as AnalysisResponse);
+      const nextAnalysis = payload as AnalysisResponse;
+      setAnalysis(nextAnalysis);
       setManualOverrides({});
-      if (payload.items?.[0]?.code) {
-        setSelectedCode(payload.items[0].code);
+      setCaseName(nextAnalysis.caseName);
+      setNotes(nextAnalysis.notes ?? notes);
+      setFiles([]);
+      if (nextAnalysis.items?.[0]?.code) {
+        setSelectedCode(nextAnalysis.items[0].code);
       }
+      await refreshCases();
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "分析失败，请稍后重试。",
@@ -256,11 +582,11 @@ function App() {
     setFiles(Array.from(nextFiles));
   }
 
-  function applyOverride(status: ReviewStatus) {
+  async function applyOverride(status: ReviewStatus) {
     if (!canExpertReview || !selectedChecklist || !selectedResult) return;
 
-    setManualOverrides((current) => ({
-      ...current,
+    const nextOverrides = {
+      ...manualOverrides,
       [selectedChecklist.code]: {
         ...selectedResult,
         status,
@@ -270,7 +596,10 @@ function App() {
           "\n\n[人工覆盖] 专家审核员已在内部工具中手动调整该项结论。",
         nextAction: "人工覆盖已完成，请在提交前复核证据链。",
       },
-    }));
+    };
+
+    setManualOverrides(nextOverrides);
+    await persistReviewSnapshot(nextOverrides);
   }
 
   function exportSummary() {
@@ -432,6 +761,54 @@ function App() {
         </div>
       </section>
 
+      <section className="mechanism panel">
+        <div className="panel-head mechanism-head">
+          <div>
+            <p className="section-kicker">Review Flow</p>
+            <h3>审查工作机制</h3>
+          </div>
+          <span className="soft-badge">AI 初判 + 专家终审</span>
+        </div>
+
+        <div className="mechanism-grid">
+          <article className="mechanism-step">
+            <span className="mechanism-index">01</span>
+            <h4>材料归档</h4>
+            <p>
+              按审查项编号上传截图和文档，系统优先依据文件名前缀完成自动归档，
+              <code>安扫报告</code> 作为全局证据参与比对。
+            </p>
+          </article>
+
+          <article className="mechanism-step">
+            <span className="mechanism-index">02</span>
+            <h4>证据抽取</h4>
+            <p>
+              图片先做 OCR，文档提取正文内容，保留命中的文件名、摘要和原始文本，
+              作为逐条审查的基础证据。
+            </p>
+          </article>
+
+          <article className="mechanism-step">
+            <span className="mechanism-index">03</span>
+            <h4>必须项复判</h4>
+            <p>
+              必须项在命中截图时追加视觉模型复判。若 OCR 与视觉结论冲突，
+              系统默认保留更保守的结果，证据不足不直接判通过。
+            </p>
+          </article>
+
+          <article className="mechanism-step">
+            <span className="mechanism-index">04</span>
+            <h4>专家终审</h4>
+            <p>
+              专家账号重点复核阻断项和证据不足项，可人工覆盖结论，
+              并输出带依据、整改项和参考做法的审核结果。
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section className="intake-panel">
         <div className="intake-head">
           <div>
@@ -506,6 +883,13 @@ function App() {
           </p>
         </div>
 
+        {analysis?.caseId ? (
+          <p className="hint sync-note">
+            当前案件已持久化保存：{analysis.caseId}，最后更新于 {formatDateTime(analysis.updatedAt)}。
+            {isSavingReview ? " 正在同步人工复核结果..." : ""}
+          </p>
+        ) : null}
+
         {error ? <p className="error-banner">{error}</p> : null}
       </section>
 
@@ -534,6 +918,40 @@ function App() {
                 {label}
               </button>
             ))}
+          </div>
+
+          <div className="summary-card">
+            <p className="section-kicker">Recent Cases</p>
+            {casesLoading ? (
+              <p>正在加载已保存案件...</p>
+            ) : caseHistory.length > 0 ? (
+              <div className="case-history">
+                {caseHistory.map((entry) => (
+                  <button
+                    type="button"
+                    key={entry.caseId}
+                    className={
+                      analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
+                    }
+                    onClick={() => loadCase(entry.caseId)}
+                  >
+                    <div className="case-link-top">
+                      <strong>{entry.caseName}</strong>
+                      <span className={`status-tag ${entry.blockerCount > 0 ? "fail" : "pending"}`}>
+                        {entry.recommendedDecision}
+                      </span>
+                    </div>
+                    <div className="item-meta">
+                      <span>{entry.createdBy.displayName}</span>
+                      <span>{formatDateTime(entry.updatedAt)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p>当前还没有已保存案件，上传并分析一次后会出现在这里。</p>
+            )}
+            {casesError ? <p className="hint">{casesError}</p> : null}
           </div>
 
           <div className="category-list">

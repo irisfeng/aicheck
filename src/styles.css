@@ -106,6 +106,7 @@ button {
 }
 
 .hero,
+.mechanism,
 .intake-panel,
 .workspace,
 .evidence-panel {
@@ -118,6 +119,57 @@ button {
   gap: 20px;
   align-items: end;
   margin-bottom: 22px;
+}
+
+.mechanism {
+  margin-bottom: 22px;
+}
+
+.mechanism-head {
+  margin-bottom: 18px;
+}
+
+.mechanism-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.mechanism-step {
+  min-height: 172px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.62)),
+    linear-gradient(135deg, rgba(14, 109, 97, 0.05), transparent 55%);
+}
+
+.mechanism-index {
+  display: inline-flex;
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.mechanism-step h4 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.mechanism-step p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.mechanism-step code {
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(18, 33, 29, 0.06);
+  color: var(--ink);
 }
 
 .hero-copy {
@@ -406,6 +458,7 @@ button {
 .ghost-button:hover,
 .filter-pill:hover,
 .override-row button:hover,
+.case-link:hover,
 .item-row:hover {
   transform: translateY(-1px);
 }
@@ -473,6 +526,38 @@ button {
 .detail-card h4 {
   margin: 2px 0 10px;
   font-size: 1rem;
+}
+
+.case-history {
+  display: grid;
+  gap: 10px;
+}
+
+.case-link {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+}
+
+.case-link.active {
+  border-color: rgba(14, 109, 97, 0.35);
+  background:
+    linear-gradient(140deg, rgba(14, 109, 97, 0.09), transparent 40%),
+    rgba(255, 255, 255, 0.84);
+}
+
+.case-link-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sync-note {
+  margin-top: 12px;
 }
 
 .items {

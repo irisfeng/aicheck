@@ -118,11 +118,86 @@ export async function enrichImage(file) {
   return text.trim();
 }
 
+export async function reviewMandatoryItemWithVision({
+  item,
+  imageFiles,
+  ocrSnippets,
+  notes,
+}) {
+  const enabled = process.env.DASHSCOPE_ENABLE_MANDATORY_VISION_RECHECK !== "false";
+  if (!enabled || !Array.isArray(imageFiles) || imageFiles.length === 0) {
+    return null;
+  }
+
+  const model = process.env.DASHSCOPE_VISION_MODEL ?? "qwen3-vl-flash";
+  const maxImages = Number(process.env.DASHSCOPE_MANDATORY_VISION_MAX_IMAGES || 3);
+  const selectedFiles = imageFiles.slice(0, Math.max(1, maxImages));
+
+  const prompt = `
+你是网信安技术审核专家。现在只审核一条“必须项”，请基于截图做保守判断。
+
+要求：
+1. 只能依据截图中可见内容判断，禁止脑补
+2. 如果截图无法清楚证明要求已满足，优先输出 insufficient_evidence 或 manual_review_required
+3. 只允许状态：pass, fail, insufficient_evidence, manual_review_required
+4. confidence 为 0-100 的整数
+5. evidenceFiles 只写当前这批截图文件名
+6. basis 写成简短数组，说明看到了什么、缺了什么、冲突点是什么
+7. remediation 写整改项
+8. referenceMethod 写补充截图或整改参考方法
+9. 输出必须是严格 JSON
+
+审查项编号：${item.code}
+审查项内容：${item.requirement}
+审核备注：${notes || "无"}
+OCR 摘要：
+${JSON.stringify(ocrSnippets.slice(0, 3), null, 2)}
+
+返回格式：
+{
+  "code": "${item.code}",
+  "status": "pass",
+  "confidence": 88,
+  "rationale": "简要判断",
+  "basis": ["依据1", "依据2"],
+  "remediation": "整改项",
+  "referenceMethod": "补充截图或参考做法",
+  "evidenceFiles": ["${selectedFiles[0]?.originalname ?? `${item.code}.png`}"]
+}
+`;
+
+  const { text } = await chatCompletion({
+    model,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a conservative visual compliance reviewer. Return strict JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          ...selectedFiles.map((file) => ({
+            type: "image_url",
+            image_url: { url: dataUrlFromFile(file) },
+          })),
+        ],
+      },
+    ],
+    temperature: 0.1,
+    maxTokens: 2200,
+  });
+
+  return parseJsonResponse(text);
+}
+
 export async function reviewChecklist({
   caseName,
   notes,
   checklist,
   evidenceIndex,
+  visionAssessments = {},
 }) {
   const model = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
   const mandatoryCount = checklist.filter((item) => item.mandatory).length;
@@ -145,6 +220,7 @@ export async function reviewChecklist({
       mandatory: item.mandatory,
       requirement: item.requirement,
       directEvidence,
+      visionRecheck: visionAssessments[item.code] ?? null,
     };
   });
 
@@ -155,13 +231,14 @@ export async function reviewChecklist({
 1. 只允许输出以下状态之一：pass, fail, insufficient_evidence, manual_review_required
 2. 对必须项必须保守：证据不充分时优先 insufficient_evidence 或 manual_review_required
 3. 不要捏造证据，不要引用不存在的文件
-4. confidence 为 0-100 的整数
-5. evidenceFiles 只写文件名数组
-6. basis 为简洁数组，写出判断依据、缺失证据点或冲突点
-7. remediation 仅在 fail / insufficient_evidence / manual_review_required 时重点给出，pass 时可以简短
-8. referenceMethod 给出一个简短参考做法，偏向截图补充建议或整改方向
-9. nextAction 要简短可执行
-10. 输出必须是严格 JSON，不要 Markdown，不要解释
+4. 如果某个必须项携带 visionRecheck，请优先参考视觉复判结果；当 OCR 与视觉冲突时，按更保守的结论输出
+5. confidence 为 0-100 的整数
+6. evidenceFiles 只写文件名数组
+7. basis 为简洁数组，写出判断依据、缺失证据点或冲突点
+8. remediation 仅在 fail / insufficient_evidence / manual_review_required 时重点给出，pass 时可以简短
+9. referenceMethod 给出一个简短参考做法，偏向截图补充建议或整改方向
+10. nextAction 要简短可执行
+11. 输出必须是严格 JSON，不要 Markdown，不要解释
 
 案件名：${caseName}
 审核备注：${notes || "无"}

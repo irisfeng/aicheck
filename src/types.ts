@@ -34,6 +34,13 @@ export type AnalysisEvidence = {
   namingHint: string;
 };
 
+export type UploadedObject = {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  objectKey: string;
+};
+
 export type ReviewItemResult = {
   code: string;
   status: ReviewStatus;
@@ -47,8 +54,14 @@ export type ReviewItemResult = {
 };
 
 export type AnalysisResponse = {
+  caseId: string;
+  createdAt?: string;
+  updatedAt?: string;
   provider: string;
   caseName: string;
+  notes?: string;
+  actor?: AuthUser;
+  uploadedFiles?: UploadedObject[];
   summary: {
     recommendedDecision: string;
     blockerCount: number;
@@ -59,4 +72,18 @@ export type AnalysisResponse = {
   };
   evidences: AnalysisEvidence[];
   items: ReviewItemResult[];
+};
+
+export type CaseSummary = {
+  caseId: string;
+  caseName: string;
+  recommendedDecision: string;
+  blockerCount: number;
+  unresolvedCount: number;
+  mandatoryPassCount: number;
+  totalMandatoryCount: number;
+  createdBy: AuthUser;
+  updatedBy: AuthUser;
+  createdAt: string;
+  updatedAt: string;
 };
