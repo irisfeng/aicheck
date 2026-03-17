@@ -6,6 +6,35 @@ const memoryStore = new Map();
 let pool;
 let schemaPromise;
 
+function normalizeWorkflow(workflow) {
+  if (!workflow || typeof workflow !== "object") {
+    return {
+      status: "draft",
+    };
+  }
+
+  return {
+    status: workflow.status || "draft",
+    submittedToExpertAt: workflow.submittedToExpertAt || undefined,
+    submittedToExpertBy: workflow.submittedToExpertBy || undefined,
+    expertReviewedAt: workflow.expertReviewedAt || undefined,
+    expertReviewedBy: workflow.expertReviewedBy || undefined,
+  };
+}
+
+function workflowRank(status) {
+  switch (status) {
+    case "pending_expert_review":
+      return 0;
+    case "draft":
+      return 1;
+    case "expert_reviewed":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 function getDatabaseUrl() {
   return process.env.DATABASE_URL ?? "";
 }
@@ -68,6 +97,7 @@ function toCaseSummary(record) {
   return {
     caseId: record.id,
     caseName: record.case_name,
+    workflow: normalizeWorkflow(record.review_data?.workflow),
     recommendedDecision: record.recommended_decision,
     blockerCount: record.blocker_count,
     unresolvedCount: record.unresolved_count,
@@ -129,8 +159,13 @@ export async function listReviewCases(user) {
   if (!usingPostgres()) {
     return Array.from(memoryStore.values())
       .filter((record) => hasCaseAccess(memoryRecordToRow(record), user))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .map((record) => toCaseSummary(memoryRecordToRow(record)));
+      .map((record) => toCaseSummary(memoryRecordToRow(record)))
+      .sort((left, right) => {
+        const rankDiff =
+          workflowRank(left.workflow.status) - workflowRank(right.workflow.status);
+        if (rankDiff !== 0) return rankDiff;
+        return right.updatedAt.localeCompare(left.updatedAt);
+      });
   }
 
   await ensurePostgresSchema();
@@ -158,7 +193,12 @@ export async function listReviewCases(user) {
         };
 
   const result = await getPool().query(query.text, query.values);
-  return result.rows.map(toCaseSummary);
+  return result.rows.map(toCaseSummary).sort((left, right) => {
+    const rankDiff =
+      workflowRank(left.workflow.status) - workflowRank(right.workflow.status);
+    if (rankDiff !== 0) return rankDiff;
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
 }
 
 export async function getReviewCase(caseId, user) {
@@ -172,6 +212,7 @@ export async function getReviewCase(caseId, user) {
 
     return {
       ...record.reviewData,
+      workflow: normalizeWorkflow(record.reviewData.workflow),
       caseId: record.id,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -196,6 +237,7 @@ export async function getReviewCase(caseId, user) {
 
   return {
     ...record.review_data,
+    workflow: normalizeWorkflow(record.review_data?.workflow),
     caseId: record.id,
     createdAt: record.created_at,
     updatedAt: record.updated_at,

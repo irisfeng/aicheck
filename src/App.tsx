@@ -8,6 +8,8 @@ import type {
   ChecklistRecord,
   ReviewItemResult,
   ReviewStatus,
+  ReviewWorkflow,
+  ReviewWorkflowStatus,
   UploadedObject,
 } from "./types";
 
@@ -34,6 +36,28 @@ const roleLabel: Record<AuthRole, string> = {
   operator: "普通上传审核",
   expert: "专家人工审核",
 };
+
+const workflowLabel: Record<ReviewWorkflowStatus, string> = {
+  draft: "草稿",
+  pending_expert_review: "待专家复审",
+  expert_reviewed: "专家已完成复审",
+};
+
+const workflowTone: Record<ReviewWorkflowStatus, string> = {
+  draft: "pending",
+  pending_expert_review: "manual",
+  expert_reviewed: "pass",
+};
+
+function normalizeWorkflow(workflow?: ReviewWorkflow): ReviewWorkflow {
+  return {
+    status: workflow?.status ?? "draft",
+    submittedToExpertAt: workflow?.submittedToExpertAt,
+    submittedToExpertBy: workflow?.submittedToExpertBy,
+    expertReviewedAt: workflow?.expertReviewedAt,
+    expertReviewedBy: workflow?.expertReviewedBy,
+  };
+}
 
 function buildPendingItem(item: ChecklistRecord): ReviewItemResult {
   return {
@@ -116,6 +140,8 @@ function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingReview, setIsSavingReview] = useState(false);
+  const [isSubmittingToExpert, setIsSubmittingToExpert] = useState(false);
+  const [isCompletingExpertReview, setIsCompletingExpertReview] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<
     "all" | "mandatory" | "blockers" | "unresolved"
@@ -132,6 +158,13 @@ function App() {
   const [casesError, setCasesError] = useState("");
 
   const canExpertReview = authUser?.role === "expert";
+  const currentWorkflow = normalizeWorkflow(analysis?.workflow);
+  const operatorCanSubmitToExpert =
+    authUser?.role === "operator" &&
+    Boolean(analysis?.caseId) &&
+    currentWorkflow.status !== "pending_expert_review";
+  const expertCanCompleteReview =
+    canExpertReview && Boolean(analysis?.caseId) && currentWorkflow.status !== "expert_reviewed";
 
   useEffect(() => {
     if (!authToken) {
@@ -386,6 +419,7 @@ function App() {
       caseName,
       notes,
       actor: authUser,
+      workflow: currentWorkflow,
       items: nextItems,
       summary: computeSummary(nextItems, nextOverview),
     };
@@ -459,6 +493,68 @@ function App() {
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "读取案件详情失败。");
+    }
+  }
+
+  async function submitToExpertReview() {
+    if (!analysis?.caseId || authUser?.role !== "operator") return;
+
+    setError("");
+    setIsSubmittingToExpert(true);
+    try {
+      const response = await fetch(`/api/cases/${analysis.caseId}/submit-expert-review`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "提交专家复审失败。");
+      }
+
+      const nextAnalysis = payload as AnalysisResponse;
+      setAnalysis(nextAnalysis);
+      setCaseName(nextAnalysis.caseName);
+      setNotes(nextAnalysis.notes ?? "");
+      await refreshCases();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "提交专家复审失败。",
+      );
+    } finally {
+      setIsSubmittingToExpert(false);
+    }
+  }
+
+  async function completeExpertReview() {
+    if (!analysis?.caseId || authUser?.role !== "expert") return;
+
+    setError("");
+    setIsCompletingExpertReview(true);
+    try {
+      const response = await fetch(`/api/cases/${analysis.caseId}/complete-expert-review`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "标记专家终审完成失败。");
+      }
+
+      const nextAnalysis = payload as AnalysisResponse;
+      setAnalysis(nextAnalysis);
+      setCaseName(nextAnalysis.caseName);
+      setNotes(nextAnalysis.notes ?? "");
+      await refreshCases();
+    } catch (completeError) {
+      setError(
+        completeError instanceof Error ? completeError.message : "标记专家终审完成失败。",
+      );
+    } finally {
+      setIsCompletingExpertReview(false);
     }
   }
 
@@ -884,8 +980,40 @@ function App() {
           >
             {isSubmitting ? "分析中..." : "开始分析"}
           </button>
+          {authUser?.role === "operator" && analysis?.caseId ? (
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={submitToExpertReview}
+              disabled={!operatorCanSubmitToExpert || isSubmittingToExpert}
+            >
+              {currentWorkflow.status === "expert_reviewed"
+                ? isSubmittingToExpert
+                  ? "重新提交中..."
+                  : "重新提交专家复审"
+                : currentWorkflow.status === "pending_expert_review"
+                  ? "已进入专家复审队列"
+                  : isSubmittingToExpert
+                    ? "提交中..."
+                    : "提交专家复审"}
+            </button>
+          ) : null}
+          {canExpertReview && analysis?.caseId ? (
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={completeExpertReview}
+              disabled={!expertCanCompleteReview || isCompletingExpertReview}
+            >
+              {currentWorkflow.status === "expert_reviewed"
+                ? "专家终审已完成"
+                : isCompletingExpertReview
+                  ? "终审提交中..."
+                  : "标记专家终审完成"}
+            </button>
+          ) : null}
           <p className="hint">
-            默认调用链路：<code>qwen-vl-ocr</code> -&gt; <code>qwen-flash</code>。如启用视觉增强，可追加 <code>qwen3-vl-flash</code>。
+            默认调用链路：<code>qwen-vl-ocr</code> -&gt; <code>qwen-flash</code>。当前视觉增强复判使用 <code>qwen3-vl-plus</code>。
           </p>
         </div>
 
@@ -893,6 +1021,21 @@ function App() {
           <p className="hint sync-note">
             当前案件已持久化保存：{analysis.caseId}，最后更新于 {formatDateTime(analysis.updatedAt)}。
             {isSavingReview ? " 正在同步人工复核结果..." : ""}
+          </p>
+        ) : null}
+
+        {analysis?.caseId ? (
+          <p className="hint sync-note">
+            工作流状态：
+            <span className={`status-tag ${workflowTone[currentWorkflow.status]}`}>
+              {workflowLabel[currentWorkflow.status]}
+            </span>
+            {currentWorkflow.submittedToExpertAt
+              ? ` 送审时间 ${formatDateTime(currentWorkflow.submittedToExpertAt)}`
+              : ""}
+            {currentWorkflow.expertReviewedAt
+              ? `，终审完成 ${formatDateTime(currentWorkflow.expertReviewedAt)}`
+              : ""}
           </p>
         ) : null}
 
@@ -943,13 +1086,19 @@ function App() {
                   >
                     <div className="case-link-top">
                       <strong>{entry.caseName}</strong>
-                      <span className={`status-tag ${entry.blockerCount > 0 ? "fail" : "pending"}`}>
-                        {entry.recommendedDecision}
+                      <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                        {workflowLabel[entry.workflow.status]}
                       </span>
                     </div>
                     <div className="item-meta">
                       <span>{entry.createdBy.displayName}</span>
                       <span>{formatDateTime(entry.updatedAt)}</span>
+                    </div>
+                    <div className="item-meta">
+                      <span>{entry.recommendedDecision}</span>
+                      {entry.workflow.submittedToExpertAt ? (
+                        <span>送审 {formatDateTime(entry.workflow.submittedToExpertAt)}</span>
+                      ) : null}
                     </div>
                   </button>
                 ))}
@@ -974,12 +1123,24 @@ function App() {
               <p className="section-kicker">AI Summary</p>
               <h4>{analysis.summary.recommendedDecision}</h4>
               <p>{analysis.summary.overview}</p>
+              <div className="detail-meta">
+                <span className={`status-tag ${workflowTone[currentWorkflow.status]}`}>
+                  {workflowLabel[currentWorkflow.status]}
+                </span>
+                {currentWorkflow.expertReviewedAt ? (
+                  <span>终审完成于 {formatDateTime(currentWorkflow.expertReviewedAt)}</span>
+                ) : currentWorkflow.submittedToExpertAt ? (
+                  <span>已送专家复审 {formatDateTime(currentWorkflow.submittedToExpertAt)}</span>
+                ) : (
+                  <span>尚未进入专家复审</span>
+                )}
+              </div>
             </div>
           ) : (
             <div className="summary-card">
               <p className="section-kicker">MVP Focus</p>
               <p>
-                普通账号只负责上传和初判，专家账号负责人工覆盖与结论导出，这样最符合内部工具的最小职责分离。
+                操作员完成 AI 初判后案件会自动进入专家复审队列；专家账号负责人工覆盖、终审确认与结论导出。
               </p>
             </div>
           )}
@@ -1086,6 +1247,27 @@ function App() {
                 ) : (
                   <p>当前条目尚未命中明确证据。</p>
                 )}
+              </article>
+
+              <article className="detail-card">
+                <h4>复审流转</h4>
+                <div className="detail-meta">
+                  <span className={`status-tag ${workflowTone[currentWorkflow.status]}`}>
+                    {workflowLabel[currentWorkflow.status]}
+                  </span>
+                  {currentWorkflow.submittedToExpertAt ? (
+                    <span>送审于 {formatDateTime(currentWorkflow.submittedToExpertAt)}</span>
+                  ) : (
+                    <span>尚未送审</span>
+                  )}
+                </div>
+                <p>
+                  {currentWorkflow.status === "pending_expert_review"
+                    ? "当前案件已进入专家复审队列，专家账号登录后可直接查看并完成终审。"
+                    : currentWorkflow.status === "expert_reviewed"
+                      ? "当前案件已完成专家终审；若操作员补充材料并重新分析，可再次送专家确认。"
+                      : "操作员完成 AI 初判后会自动进入专家复审队列，也支持手动重新提交专家复审。"}
+                </p>
               </article>
 
               <article className="detail-card">

@@ -56,6 +56,53 @@ const severityRank = {
   fail: 3,
 };
 
+function sanitizeWorkflowUser(user) {
+  if (!user) return undefined;
+
+  return {
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+  };
+}
+
+function normalizeWorkflow(workflow) {
+  if (!workflow || typeof workflow !== "object") {
+    return {
+      status: "draft",
+    };
+  }
+
+  return {
+    status: workflow.status || "draft",
+    submittedToExpertAt: workflow.submittedToExpertAt || undefined,
+    submittedToExpertBy: sanitizeWorkflowUser(workflow.submittedToExpertBy),
+    expertReviewedAt: workflow.expertReviewedAt || undefined,
+    expertReviewedBy: sanitizeWorkflowUser(workflow.expertReviewedBy),
+  };
+}
+
+function createPendingExpertWorkflow(actor) {
+  return {
+    status: "pending_expert_review",
+    submittedToExpertAt: new Date().toISOString(),
+    submittedToExpertBy: sanitizeWorkflowUser(actor),
+  };
+}
+
+function createExpertReviewedWorkflow(actor, existingWorkflow) {
+  const current = normalizeWorkflow(existingWorkflow);
+
+  return {
+    status: "expert_reviewed",
+    submittedToExpertAt: current.submittedToExpertAt || new Date().toISOString(),
+    submittedToExpertBy:
+      current.submittedToExpertBy || sanitizeWorkflowUser(actor),
+    expertReviewedAt: new Date().toISOString(),
+    expertReviewedBy: sanitizeWorkflowUser(actor),
+  };
+}
+
 function pickConservativeResult(baseResult, visionResult, mandatory) {
   if (!baseResult) return visionResult;
   if (!visionResult || !mandatory) return baseResult;
@@ -399,6 +446,7 @@ export function createApiRouter() {
       }
 
       const notes = String(req.body?.notes || reviewPayload.notes || "");
+      const workflow = normalizeWorkflow(reviewPayload.workflow);
       const persistence = await saveReviewCase({
         caseId: req.params.caseId,
         caseName,
@@ -410,6 +458,7 @@ export function createApiRouter() {
           caseName,
           notes,
           actor: req.auth.user,
+          workflow,
         },
       });
 
@@ -423,6 +472,84 @@ export function createApiRouter() {
       console.error(error);
       res.status(500).json({
         error: error instanceof Error ? error.message : "保存人工复核结果失败。",
+      });
+    }
+  });
+
+  router.post("/cases/:caseId/submit-expert-review", requireAuth, async (req, res) => {
+    try {
+      if (req.auth.user.role !== "operator") {
+        return res.status(403).json({
+          error: "仅普通上传审核账号可提交专家复审。",
+        });
+      }
+
+      const reviewCase = await getReviewCase(req.params.caseId, req.auth.user);
+      if (!reviewCase) {
+        return res.status(404).json({
+          error: "未找到该案件，或当前账号无权访问。",
+        });
+      }
+
+      const nextPayload = {
+        ...reviewCase,
+        actor: req.auth.user,
+        workflow: createPendingExpertWorkflow(req.auth.user),
+      };
+
+      const persistence = await saveReviewCase({
+        caseId: req.params.caseId,
+        caseName: String(reviewCase.caseName || "").trim() || "语音业务接入审核案件",
+        notes: String(reviewCase.notes || ""),
+        provider: reviewCase.provider || getProviderLabel(),
+        actor: req.auth.user,
+        reviewData: nextPayload,
+      });
+
+      res.json(attachPersistenceMeta(nextPayload, persistence));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "提交专家复审失败。",
+      });
+    }
+  });
+
+  router.post("/cases/:caseId/complete-expert-review", requireAuth, async (req, res) => {
+    try {
+      if (req.auth.user.role !== "expert") {
+        return res.status(403).json({
+          error: "仅专家人工审核账号可完成终审。",
+        });
+      }
+
+      const reviewCase = await getReviewCase(req.params.caseId, req.auth.user);
+      if (!reviewCase) {
+        return res.status(404).json({
+          error: "未找到该案件，或当前账号无权访问。",
+        });
+      }
+
+      const nextPayload = {
+        ...reviewCase,
+        actor: req.auth.user,
+        workflow: createExpertReviewedWorkflow(req.auth.user, reviewCase.workflow),
+      };
+
+      const persistence = await saveReviewCase({
+        caseId: req.params.caseId,
+        caseName: String(reviewCase.caseName || "").trim() || "语音业务接入审核案件",
+        notes: String(reviewCase.notes || ""),
+        provider: reviewCase.provider || getProviderLabel(),
+        actor: req.auth.user,
+        reviewData: nextPayload,
+      });
+
+      res.json(attachPersistenceMeta(nextPayload, persistence));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "标记专家终审完成失败。",
       });
     }
   });
@@ -528,6 +655,10 @@ export function createApiRouter() {
         caseName,
         notes,
         actor: req.auth.user,
+        workflow:
+          req.auth.user.role === "operator"
+            ? createPendingExpertWorkflow(req.auth.user)
+            : normalizeWorkflow(undefined),
         uploadedFiles,
         evidences,
         summary,

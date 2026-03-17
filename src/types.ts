@@ -13,6 +13,19 @@ export type AuthUser = {
   role: AuthRole;
 };
 
+export type ReviewWorkflowStatus =
+  | "draft"
+  | "pending_expert_review"
+  | "expert_reviewed";
+
+export type ReviewWorkflow = {
+  status: ReviewWorkflowStatus;
+  submittedToExpertAt?: string;
+  submittedToExpertBy?: AuthUser;
+  expertReviewedAt?: string;
+  expertReviewedBy?: AuthUser;
+};
+
 export type ChecklistRecord = {
   row_index: number;
   category: string;
@@ -61,6 +74,7 @@ export type AnalysisResponse = {
   caseName: string;
   notes?: string;
   actor?: AuthUser;
+  workflow?: ReviewWorkflow;
   uploadedFiles?: UploadedObject[];
   summary: {
     recommendedDecision: string;
@@ -77,6 +91,7 @@ export type AnalysisResponse = {
 export type CaseSummary = {
   caseId: string;
   caseName: string;
+  workflow: ReviewWorkflow;
   recommendedDecision: string;
   blockerCount: number;
   unresolvedCount: number;
