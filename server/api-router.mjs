@@ -25,6 +25,7 @@ import {
   isObjectStorageConfigured,
   readUploadedObjects,
 } from "./object-storage.mjs";
+import { createRateLimitMiddleware } from "./rate-limit.mjs";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -32,6 +33,20 @@ const upload = multer({
     fileSize: 15 * 1024 * 1024,
     files: 20,
   },
+});
+
+const loginRateLimit = createRateLimitMiddleware({
+  key: "login",
+  windowMs: Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000),
+  max: Number(process.env.LOGIN_RATE_LIMIT_MAX || 10),
+  message: "登录尝试过于频繁，请稍后再试。",
+});
+
+const analyzeRateLimit = createRateLimitMiddleware({
+  key: "analyze",
+  windowMs: Number(process.env.ANALYZE_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000),
+  max: Number(process.env.ANALYZE_RATE_LIMIT_MAX || 20),
+  message: "分析请求过于频繁，请稍后再试。",
 });
 
 const severityRank = {
@@ -241,18 +256,16 @@ export function createApiRouter() {
   router.use(express.json({ limit: "4mb" }));
 
   router.get("/health", (_req, res) => {
+    const ready =
+      isApiConfigured() && isDatabaseConfigured() && isObjectStorageConfigured();
+
     res.json({
       ok: true,
-      provider: getProviderLabel(),
-      apiConfigured: isApiConfigured(),
-      databaseConfigured: isDatabaseConfigured(),
-      storage: getStorageLabel(),
-      objectStorageConfigured: isObjectStorageConfigured(),
-      objectStorage: getObjectStorageLabel(),
+      status: ready ? "ready" : "degraded",
     });
   });
 
-  router.post("/auth/login", async (req, res) => {
+  router.post("/auth/login", loginRateLimit, async (req, res) => {
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
     const session = await login(username, password);
@@ -390,7 +403,7 @@ export function createApiRouter() {
     }
   });
 
-  router.post("/analyze", requireAuth, upload.array("files", 20), async (req, res) => {
+  router.post("/analyze", requireAuth, analyzeRateLimit, upload.array("files", 20), async (req, res) => {
     try {
       if (!isApiConfigured()) {
         return res.status(400).json({
