@@ -4,6 +4,18 @@ function getAuthSecret() {
   return process.env.AUTH_SECRET || process.env.JWT_SECRET || "aicheck-dev-secret";
 }
 
+function getAuthTokenTtl() {
+  const raw = String(process.env.AUTH_TOKEN_TTL || "").trim();
+  if (!raw) return "12h";
+
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw);
+    return numeric <= 72 ? `${numeric}h` : `${numeric}s`;
+  }
+
+  return raw;
+}
+
 export function configuredUsers() {
   return [
     {
@@ -39,7 +51,7 @@ export async function createToken(user) {
     getAuthSecret(),
     {
       algorithm: "HS256",
-      expiresIn: process.env.AUTH_TOKEN_TTL ?? "12h",
+      expiresIn: getAuthTokenTtl(),
     },
   );
 }
