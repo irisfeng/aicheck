@@ -5,6 +5,14 @@ export type ReviewStatus =
   | "insufficient_evidence"
   | "manual_review_required";
 
+export type AuthRole = "operator" | "expert";
+
+export type AuthUser = {
+  username: string;
+  displayName: string;
+  role: AuthRole;
+};
+
 export type ChecklistRecord = {
   row_index: number;
   category: string;

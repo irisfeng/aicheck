@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import { login, logout, readBearerToken, requireAuth } from "./auth.mjs";
 import { loadChecklist } from "./checklist.mjs";
 import { extractDocumentText } from "./document-extractor.mjs";
 import {
@@ -34,7 +35,32 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
+app.post("/api/auth/login", (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+  const session = login(username, password);
+
+  if (!session) {
+    return res.status(401).json({
+      error: "用户名或密码不正确。",
+    });
+  }
+
+  res.json(session);
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({
+    user: req.auth.user,
+  });
+});
+
+app.post("/api/auth/logout", requireAuth, (req, res) => {
+  logout(req.auth.token);
+  res.json({ ok: true });
+});
+
+app.post("/api/analyze", requireAuth, upload.array("files", 20), async (req, res) => {
   try {
     if (!isApiConfigured()) {
       return res.status(400).json({
@@ -46,7 +72,7 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
     const checklistPayload = await loadChecklist();
     const checklist = checklistPayload.items;
     const checklistCodes = new Set(checklist.map((item) => item.code));
-    const caseName = String(req.body.caseName || "内部审核案件");
+    const caseName = String(req.body.caseName || "语音业务接入审核案件");
     const notes = String(req.body.notes || "");
     const files = req.files || [];
 
@@ -169,6 +195,7 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
     res.json({
       provider: getProviderLabel(),
       caseName,
+      actor: req.auth.user,
       evidences,
       summary,
       items: normalizedItems,
@@ -182,5 +209,12 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`AICheck server running at http://localhost:${port}`);
+  console.log(`Voice review desk running at http://localhost:${port}`);
+  console.log(
+    `Demo accounts: ${process.env.DEMO_OPERATOR_USERNAME ?? "operator"} / ${
+      process.env.DEMO_OPERATOR_PASSWORD ?? "operator123"
+    }, ${process.env.DEMO_EXPERT_USERNAME ?? "expert"} / ${
+      process.env.DEMO_EXPERT_PASSWORD ?? "expert123"
+    }`,
+  );
 });
