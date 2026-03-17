@@ -136,6 +136,15 @@ app.post("/api/analyze", requireAuth, upload.array("files", 20), async (req, res
             : "manual_review_required",
           confidence: 0,
           rationale: "模型未返回该审查项结果，系统已按保守策略回退。",
+          basis: directFiles.length
+            ? [`已命中材料：${directFiles.join("、")}`, "但模型未返回可用判定结果。"]
+            : ["未找到与该审查项直接对应的命名材料。"],
+          remediation: directFiles.length
+            ? "请专家复核现有材料，必要时补充更完整的配置截图。"
+            : "请补充与该编号对应的截图，至少覆盖关键配置页、状态页或策略明细页。",
+          referenceMethod: directFiles.length
+            ? "建议补充同一配置项的完整页面截图，包含标题、字段值和保存状态。"
+            : "建议按“审查项编号-序号-说明”的格式补充截图，例如 2.8.1.1-1-密码策略.png。",
           evidenceFiles: directFiles,
           nextAction: directFiles.length
             ? "请人工复核现有佐证材料。"
@@ -145,6 +154,14 @@ app.post("/api/analyze", requireAuth, upload.array("files", 20), async (req, res
 
       return {
         ...modelItem,
+        basis:
+          Array.isArray(modelItem.basis) && modelItem.basis.length > 0
+            ? modelItem.basis
+            : directFiles.length > 0
+              ? [`已关联材料：${directFiles.join("、")}`]
+              : ["暂无直接依据。"],
+        remediation: modelItem.remediation || "暂无。",
+        referenceMethod: modelItem.referenceMethod || "暂无。",
         evidenceFiles:
           Array.isArray(modelItem.evidenceFiles) && modelItem.evidenceFiles.length > 0
             ? [...new Set(modelItem.evidenceFiles)]

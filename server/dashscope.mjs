@@ -157,8 +157,11 @@ export async function reviewChecklist({
 3. 不要捏造证据，不要引用不存在的文件
 4. confidence 为 0-100 的整数
 5. evidenceFiles 只写文件名数组
-6. nextAction 要简短可执行
-7. 输出必须是严格 JSON，不要 Markdown，不要解释
+6. basis 为简洁数组，写出判断依据、缺失证据点或冲突点
+7. remediation 仅在 fail / insufficient_evidence / manual_review_required 时重点给出，pass 时可以简短
+8. referenceMethod 给出一个简短参考做法，偏向截图补充建议或整改方向
+9. nextAction 要简短可执行
+10. 输出必须是严格 JSON，不要 Markdown，不要解释
 
 案件名：${caseName}
 审核备注：${notes || "无"}
@@ -186,6 +189,9 @@ ${JSON.stringify(checklistPayload, null, 2)}
       "status": "pass",
       "confidence": 88,
       "rationale": "简明理由",
+      "basis": ["依据1", "依据2"],
+      "remediation": "如不符合时给出整改项",
+      "referenceMethod": "建议补充哪类截图或参考配置方式",
       "evidenceFiles": ["xxx.png"],
       "nextAction": "如需补件给出动作"
     }

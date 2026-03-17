@@ -125,6 +125,9 @@ function App() {
         status: "pending" as ReviewStatus,
         confidence: 0,
         rationale: "尚未运行分析。",
+        basis: ["尚未生成依据。"],
+        remediation: "暂无。",
+        referenceMethod: "暂无。",
         evidenceFiles: [],
         nextAction: "上传材料后点击开始分析。",
       }
@@ -624,6 +627,27 @@ function App() {
                 <div className="detail-meta">
                   <span>置信度 {selectedResult?.confidence ?? 0}</span>
                   <span>{selectedResult?.nextAction ?? "待分析"}</span>
+                </div>
+              </article>
+
+              <article className="detail-card">
+                <h4>依据</h4>
+                {selectedResult?.basis?.length ? (
+                  <ul className="evidence-list">
+                    {selectedResult.basis.map((entry, index) => (
+                      <li key={`${selectedChecklist.code}-basis-${index}`}>{entry}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>当前暂无结构化依据。</p>
+                )}
+              </article>
+
+              <article className="detail-card">
+                <h4>整改项 / 参考做法</h4>
+                <p>{selectedResult?.remediation ?? "暂无。"}</p>
+                <div className="detail-meta">
+                  <span>{selectedResult?.referenceMethod ?? "暂无参考做法。"}</span>
                 </div>
               </article>
 

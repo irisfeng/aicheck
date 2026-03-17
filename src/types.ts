@@ -39,6 +39,9 @@ export type ReviewItemResult = {
   status: ReviewStatus;
   confidence: number;
   rationale: string;
+  basis: string[];
+  remediation: string;
+  referenceMethod: string;
   evidenceFiles: string[];
   nextAction: string;
 };
