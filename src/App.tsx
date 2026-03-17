@@ -246,7 +246,13 @@ function App() {
               onChange={(event) => updateFiles(event.target.files)}
             />
             <strong>拖拽或点击上传材料</strong>
-            <span>支持图片、PDF、DOCX、TXT、MD、JSON。MVP 默认走百炼 API。</span>
+            <span>
+              支持图片、PDF、DOCX、TXT、MD、JSON。建议按
+              <code>2.8.1.1.png</code>、
+              <code>2.8.1.1-1.png</code>、
+              <code>安扫报告.pdf</code>
+              命名，系统会优先按文件名前缀自动归档。
+            </span>
           </label>
         </div>
 
@@ -462,6 +468,16 @@ function App() {
                   <span>{evidence.source}</span>
                 </div>
                 <p>{evidence.summary}</p>
+                <div className="detail-meta">
+                  <span>{evidence.namingHint}</span>
+                  <span>
+                    {evidence.globalEvidence
+                      ? "全局材料"
+                      : evidence.linkedCodes.length > 0
+                        ? `命中 ${evidence.linkedCodes.join(", ")}`
+                        : "未自动归档"}
+                  </span>
+                </div>
                 <pre>{evidence.extractedText.slice(0, 500) || "未提取到有效文本。"}</pre>
               </article>
             ))}

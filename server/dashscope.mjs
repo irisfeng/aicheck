@@ -118,22 +118,35 @@ export async function enrichImage(file) {
   return text.trim();
 }
 
-export async function reviewChecklist({ caseName, notes, checklist, evidences }) {
+export async function reviewChecklist({
+  caseName,
+  notes,
+  checklist,
+  evidenceIndex,
+}) {
   const model = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
   const mandatoryCount = checklist.filter((item) => item.mandatory).length;
-  const evidencePayload = evidences.map((evidence) => ({
+  const globalEvidencePayload = evidenceIndex.globalEvidences.map((evidence) => ({
     fileName: evidence.fileName,
-    source: evidence.source,
     summary: evidence.summary,
-    extractedText: evidence.extractedText.slice(0, 3200),
+    extractedText: evidence.extractedText.slice(0, 2200),
   }));
 
-  const checklistPayload = checklist.map((item) => ({
-    code: item.code,
-    category: item.category,
-    mandatory: item.mandatory,
-    requirement: item.requirement,
-  }));
+  const checklistPayload = checklist.map((item) => {
+    const directEvidence = (evidenceIndex.directByCode[item.code] ?? []).map((evidence) => ({
+      fileName: evidence.fileName,
+      summary: evidence.summary,
+      extractedText: evidence.extractedText.slice(0, 2200),
+    }));
+
+    return {
+      code: item.code,
+      category: item.category,
+      mandatory: item.mandatory,
+      requirement: item.requirement,
+      directEvidence,
+    };
+  });
 
   const prompt = `
 你是一个内部网信安审核助手。请基于案件材料，对审查项逐条给出保守判断。
@@ -151,11 +164,11 @@ export async function reviewChecklist({ caseName, notes, checklist, evidences })
 审核备注：${notes || "无"}
 必须项数量：${mandatoryCount}
 
-审查项：
-${JSON.stringify(checklistPayload, null, 2)}
+全局材料（适用于所有条目，如安扫报告）：
+${JSON.stringify(globalEvidencePayload, null, 2)}
 
-证据材料：
-${JSON.stringify(evidencePayload, null, 2)}
+审查项与直连证据：
+${JSON.stringify(checklistPayload, null, 2)}
 
 返回格式：
 {

@@ -21,6 +21,9 @@ export type AnalysisEvidence = {
   extractedText: string;
   summary: string;
   source: "ocr" | "document" | "text";
+  linkedCodes: string[];
+  globalEvidence: boolean;
+  namingHint: string;
 };
 
 export type ReviewItemResult = {

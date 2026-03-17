@@ -15,6 +15,19 @@ Internal MVP for AI-assisted security checklist review.
 - Images: `.png`, `.jpg`, `.jpeg`, `.webp`
 - Documents: `.pdf`, `.docx`, `.txt`, `.md`, `.json`
 
+## Recommended File Naming
+
+Use review-item codes as filename prefixes whenever possible:
+
+- `2.8.1.1.png`
+- `2.8.1.1-1.png`
+- `2.8.1.1-2.png`
+- `2.8.2.3-1-IP白名单.png`
+- `安扫报告.pdf`
+
+The backend will automatically route files with checklist-style prefixes to the
+matching item. Files named like `安扫报告.pdf` are treated as global evidence.
+
 ## Quick Start
 
 1. Copy `.env.example` to `.env`
