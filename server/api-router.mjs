@@ -25,7 +25,13 @@ import {
   isObjectStorageConfigured,
   readUploadedObjects,
 } from "./object-storage.mjs";
-import { createRateLimitMiddleware } from "./rate-limit.mjs";
+import {
+  consumeRateLimit,
+  createRateLimitMiddleware,
+  getClientIp,
+  getRateLimitStatus,
+  resetRateLimit,
+} from "./rate-limit.mjs";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -33,13 +39,6 @@ const upload = multer({
     fileSize: 15 * 1024 * 1024,
     files: 20,
   },
-});
-
-const loginRateLimit = createRateLimitMiddleware({
-  key: "login",
-  windowMs: Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000),
-  max: Number(process.env.LOGIN_RATE_LIMIT_MAX || 10),
-  message: "登录尝试过于频繁，请稍后再试。",
 });
 
 const analyzeRateLimit = createRateLimitMiddleware({
@@ -265,17 +264,42 @@ export function createApiRouter() {
     });
   });
 
-  router.post("/auth/login", loginRateLimit, async (req, res) => {
+  router.post("/auth/login", async (req, res) => {
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
+    const loginWindowMs = Number(process.env.LOGIN_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000);
+    const loginMax = Number(process.env.LOGIN_RATE_LIMIT_MAX || 10);
+    const rateIdentity = `${getClientIp(req)}:${username.toLowerCase() || "unknown"}`;
+    const rateStatus = getRateLimitStatus({
+      key: "login",
+      identity: rateIdentity,
+      windowMs: loginWindowMs,
+      max: loginMax,
+    });
+
+    if (rateStatus.limited) {
+      res.setHeader("Retry-After", String(rateStatus.retryAfterSeconds));
+      return res.status(429).json({
+        error: "登录尝试过于频繁，请稍后再试。",
+      });
+    }
     const session = await login(username, password);
 
     if (!session) {
+      consumeRateLimit({
+        key: "login",
+        identity: rateIdentity,
+        windowMs: loginWindowMs,
+      });
       return res.status(401).json({
         error: "用户名或密码不正确。",
       });
     }
 
+    resetRateLimit({
+      key: "login",
+      identity: rateIdentity,
+    });
     res.json(session);
   });
 

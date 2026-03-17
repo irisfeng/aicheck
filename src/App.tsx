@@ -705,7 +705,6 @@ function App() {
             <button className="primary-button" type="button" onClick={handleLogin}>
               登录进入
             </button>
-            <p className="hint">测试账号可在 `.env` 中按角色配置。</p>
           </div>
 
           {authError ? <p className="error-banner">{authError}</p> : null}
