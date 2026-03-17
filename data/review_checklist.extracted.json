@@ -1,0 +1,198 @@
+{
+  "source_file": "C:\\Users\\tonif\\Documents\\work\\1207\\BSY\\项目\\语音业务\\准入材料\\八通亿达\\新入网、增加模块评审清单目录V2-20260112\\评审项清单.docx",
+  "table_index": 1,
+  "summary": {
+    "total_items": 22,
+    "mandatory_items": 13,
+    "optional_items": 9,
+    "categories": {
+      "强化认证防护": 6,
+      "封堵互联网暴露风险": 6,
+      "升级访问控制": 3,
+      "流量监测机制": 3,
+      "实时监测预警": 4
+    },
+    "example_statuses": {
+      "符合": 11,
+      "不符合": 11
+    }
+  },
+  "items": [
+    {
+      "row_index": 2,
+      "category": "强化认证防护",
+      "code": "2.8.1.1",
+      "requirement": "默认账号及其它账号均设置为强口令，采用12位以上强密码（字母+数字+符号组合）",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 3,
+      "category": "强化认证防护",
+      "code": "2.8.1.2",
+      "requirement": "具备强制性定期修改密码机制，且周期不高于3个月",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 4,
+      "category": "强化认证防护",
+      "code": "2.8.1.3",
+      "requirement": "运维账户实施实名制开通并绑定MAC+IP白名单",
+      "mandatory": false,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 5,
+      "category": "强化认证防护",
+      "code": "2.8.1.4",
+      "requirement": "动态口令有效期控制在10分钟以内",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 6,
+      "category": "强化认证防护",
+      "code": "2.8.1.5",
+      "requirement": "启用登录失败锁定功能（例如：连续5次错误登录冻结账户30分钟）",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 7,
+      "category": "强化认证防护",
+      "code": "2.8.1.6",
+      "requirement": "启用双因子认证，关键设备管理界面强制开启短信/令牌双因素认证",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 8,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.1",
+      "requirement": "关闭非必要公网访问端口，禁用默认远程登录端口（如Telnet 23端口，一般情况下通信端口不使用默认的5060端口注册；）",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 9,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.2",
+      "requirement": "中继设备、语音网关置于防火墙后",
+      "mandatory": true,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 10,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.3",
+      "requirement": "设置访问控制，仅允许可信IP访问管理界面",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 11,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.4",
+      "requirement": "强制使用SSH等加密协议",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 12,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.5",
+      "requirement": "启用端口隐身策略，修改默认服务端口或部署端口混淆技术",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 13,
+      "category": "封堵互联网暴露风险",
+      "code": "2.8.2.6",
+      "requirement": "不将运维管理界面对公网开放",
+      "mandatory": true,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 14,
+      "category": "升级访问控制",
+      "code": "2.8.3.1",
+      "requirement": "配置访问白名单，仅限运维终端IP连接管理接口",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 15,
+      "category": "升级访问控制",
+      "code": "2.8.3.2",
+      "requirement": "划分业务网络隔离区，限制语音设备与核心数据网络的互通权限",
+      "mandatory": true,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 16,
+      "category": "升级访问控制",
+      "code": "2.8.3.3",
+      "requirement": "权限管理实现闭环，执行最小权限原则，管理员账户仅保留必要操作权限，高危命令需二次生物特征验证。",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 17,
+      "category": "流量监测机制",
+      "code": "2.8.4.1",
+      "requirement": "在语音网关前部署流量探针，自动拦截同一IP源>50次/分钟认证请求",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 18,
+      "category": "流量监测机制",
+      "code": "2.8.4.2",
+      "requirement": "对非常规工作时段（如0:00-6:00）的管理端访问进行二次认证",
+      "mandatory": false,
+      "example_status": "不符合"
+    },
+    {
+      "row_index": 19,
+      "category": "流量监测机制",
+      "code": "2.8.4.3",
+      "requirement": "阻断境外IP的管理访问",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 20,
+      "category": "实时监测预警",
+      "code": "2.8.5.1",
+      "requirement": "定期针对语音网关等设备开展漏洞扫描",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 21,
+      "category": "实时监测预警",
+      "code": "2.8.5.2",
+      "requirement": "部署日志审计系统，监控异常登录行为（如非工作时间访问、高频失败尝试）",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 22,
+      "category": "实时监测预警",
+      "code": "2.8.5.3",
+      "requirement": "非本机集中备份存储6个月以上完整操作日志（含源IP、会话ID、操作指令）",
+      "mandatory": true,
+      "example_status": "符合"
+    },
+    {
+      "row_index": 23,
+      "category": "实时监测预警",
+      "code": "2.8.5.4",
+      "requirement": "备份日志的修改需其他权限认证通过后方可实施",
+      "mandatory": false,
+      "example_status": "不符合"
+    }
+  ]
+}
