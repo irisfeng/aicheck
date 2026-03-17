@@ -3,6 +3,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
+    "api/[...route].mjs": {
+      "maxDuration": 300
+    },
     "api/index.mjs": {
       "maxDuration": 300
     }
