@@ -106,6 +106,7 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(Boolean(authToken));
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
 
   const [caseName, setCaseName] = useState("语音业务接入审核案件");
@@ -463,7 +464,7 @@ function App() {
 
   async function handleLogin() {
     setAuthError("");
-    setAuthLoading(true);
+    setIsLoggingIn(true);
 
     try {
       const response = await fetch("/api/auth/login", {
@@ -487,7 +488,8 @@ function App() {
       setAuthError(
         loginError instanceof Error ? loginError.message : "登录失败，请检查账号信息。",
       );
-      setAuthLoading(false);
+    } finally {
+      setIsLoggingIn(false);
     }
   }
 
@@ -702,8 +704,13 @@ function App() {
           </div>
 
           <div className="action-row login-actions">
-            <button className="primary-button" type="button" onClick={handleLogin}>
-              登录进入
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleLogin}
+              disabled={isLoggingIn}
+            >
+              {isLoggingIn ? "登录中..." : "登录进入"}
             </button>
           </div>
 
