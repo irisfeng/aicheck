@@ -41,11 +41,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "/api/proxy/:path*"
+      "destination": "/api/index"
     }
   ],
   "functions": {
-    "api/proxy/[...route].mjs": {
+    "api/index.mjs": {
       "maxDuration": 300
     }
   }
