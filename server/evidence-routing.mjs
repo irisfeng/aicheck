@@ -1,4 +1,3 @@
-const codePattern = /^(\d+(?:\.\d+)+)(?:-(\d+))?(?:$|[-_\s(（])/;
 const globalEvidencePattern = /(安扫报告|扫描报告|漏洞扫描|scan report|security scan)/i;
 
 function stripExtension(fileName) {
@@ -6,12 +5,33 @@ function stripExtension(fileName) {
   return index === -1 ? fileName : fileName.slice(0, index);
 }
 
+function hasValidBoundary(remainder) {
+  if (!remainder) return true;
+
+  const firstChar = remainder[0];
+  return firstChar !== "." && !/\d/u.test(firstChar);
+}
+
+function inferLinkedCodes(baseName, checklistCodes) {
+  const sortedCodes = [...checklistCodes].sort((left, right) => right.length - left.length);
+
+  for (const code of sortedCodes) {
+    if (!baseName.startsWith(code)) {
+      continue;
+    }
+
+    const remainder = baseName.slice(code.length);
+    if (hasValidBoundary(remainder)) {
+      return [code];
+    }
+  }
+
+  return [];
+}
+
 export function inferEvidenceRouting(fileName, checklistCodes) {
   const baseName = stripExtension(fileName).trim();
-  const match = baseName.match(codePattern);
-  const matchedCode = match?.[1] ?? "";
-  const linkedCodes =
-    matchedCode && checklistCodes.has(matchedCode) ? [matchedCode] : [];
+  const linkedCodes = inferLinkedCodes(baseName, checklistCodes);
   const globalEvidence = globalEvidencePattern.test(baseName);
 
   let namingHint = "未命中自动归档规则";
