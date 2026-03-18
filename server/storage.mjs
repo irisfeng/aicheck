@@ -146,6 +146,7 @@ async function ensurePostgresSchema() {
 function toCaseSummary(record) {
   return {
     caseId: record.id,
+    businessName: record.case_name,
     caseName: record.case_name,
     workflow: normalizeWorkflow(record.review_data?.workflow),
     recommendedDecision: record.recommended_decision,
@@ -262,6 +263,7 @@ export async function getReviewCase(caseId, user) {
 
     return {
       ...record.reviewData,
+      businessName: record.reviewData.businessName || record.reviewData.caseName || record.caseName,
       workflow: normalizeWorkflow(record.reviewData.workflow),
       caseId: record.id,
       createdAt: record.createdAt,
@@ -287,6 +289,8 @@ export async function getReviewCase(caseId, user) {
 
   return {
     ...record.review_data,
+    businessName:
+      record.review_data?.businessName || record.review_data?.caseName || record.case_name,
     workflow: normalizeWorkflow(record.review_data?.workflow),
     caseId: record.id,
     createdAt: record.created_at,

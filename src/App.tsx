@@ -228,7 +228,7 @@ function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
 
-  const [caseName, setCaseName] = useState("语音业务接入审核案件");
+  const [businessName, setBusinessName] = useState("");
   const [notes, setNotes] = useState(
     "优先关注黄底必须项；若证据不足，宁可判为待人工复核。",
   );
@@ -252,6 +252,7 @@ function App() {
   const [casesLoading, setCasesLoading] = useState(false);
   const [casesError, setCasesError] = useState("");
   const batchRecommendation = buildBatchRecommendation(files);
+  const trimmedBusinessName = businessName.trim();
 
   const canExpertReview = authUser?.role === "expert";
   const currentWorkflow = normalizeWorkflow(analysis?.workflow);
@@ -512,7 +513,8 @@ function App() {
 
     return {
       ...analysis,
-      caseName,
+      businessName: trimmedBusinessName,
+      caseName: trimmedBusinessName,
       notes,
       actor: authUser,
       workflow: currentWorkflow,
@@ -536,7 +538,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
-          caseName,
+          businessName: trimmedBusinessName,
           notes,
           review: snapshot,
         }),
@@ -581,7 +583,7 @@ function App() {
       const nextAnalysis = payload as AnalysisResponse;
       setAnalysis(nextAnalysis);
       setManualOverrides({});
-      setCaseName(nextAnalysis.caseName);
+      setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? "");
       setFiles([]);
       if (nextAnalysis.items?.[0]?.code) {
@@ -611,7 +613,7 @@ function App() {
 
       const nextAnalysis = payload as AnalysisResponse;
       setAnalysis(nextAnalysis);
-      setCaseName(nextAnalysis.caseName);
+      setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? "");
       await refreshCases();
     } catch (submitError) {
@@ -642,7 +644,7 @@ function App() {
 
       const nextAnalysis = payload as AnalysisResponse;
       setAnalysis(nextAnalysis);
-      setCaseName(nextAnalysis.caseName);
+      setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? "");
       await refreshCases();
     } catch (completeError) {
@@ -709,6 +711,12 @@ function App() {
 
   async function handleSubmit() {
     setError("");
+
+    if (!trimmedBusinessName) {
+      setError("请先填写业务名称，再上传材料并发起分析。");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -723,7 +731,7 @@ function App() {
             Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({
-            caseName,
+            businessName: trimmedBusinessName,
             notes,
             caseId: analysis?.caseId,
             uploadedFiles,
@@ -731,7 +739,7 @@ function App() {
         });
       } else {
         const formData = new FormData();
-        formData.append("caseName", caseName);
+        formData.append("businessName", trimmedBusinessName);
         formData.append("notes", notes);
         if (analysis?.caseId) {
           formData.append("caseId", analysis.caseId);
@@ -755,7 +763,7 @@ function App() {
       const nextAnalysis = payload as AnalysisResponse;
       setAnalysis(nextAnalysis);
       setManualOverrides({});
-      setCaseName(nextAnalysis.caseName);
+      setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? notes);
       setFiles([]);
       if (nextAnalysis.items?.[0]?.code) {
@@ -800,7 +808,7 @@ function App() {
     if (!canExpertReview) return;
 
     const lines = [
-      `# ${caseName} - Review Export`,
+      `# ${trimmedBusinessName || "未命名业务"} - Review Export`,
       "",
       `- 总项数: ${checklistItems.length}`,
       `- 已通过: ${statPass}`,
@@ -1025,9 +1033,17 @@ function App() {
 
         <div className="intake-grid">
           <label className="field">
-            <span>案件名称</span>
-            <input value={caseName} onChange={(event) => setCaseName(event.target.value)} />
+            <span>业务名称</span>
+            <input
+              value={businessName}
+              placeholder="请填写业务名称，如：语音网关接入"
+              onChange={(event) => setBusinessName(event.target.value)}
+            />
           </label>
+
+          <p className="uploader-note field-wide">
+            请先填写业务名称。后续上传分析、案件保存、专家复审与导出结果都会基于该业务名称流转。
+          </p>
 
           <label className="field field-wide">
             <span>审核备注 / 补充要求</span>
@@ -1085,7 +1101,7 @@ function App() {
             className="primary-button"
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !trimmedBusinessName}
           >
             {isSubmitting ? "分析中..." : "开始分析"}
           </button>
@@ -1148,6 +1164,10 @@ function App() {
           </p>
         ) : null}
 
+        {!trimmedBusinessName ? (
+          <p className="hint sync-note">请先填写业务名称，再发起上传分析。</p>
+        ) : null}
+
         {error ? <p className="error-banner">{error}</p> : null}
       </section>
 
@@ -1194,7 +1214,7 @@ function App() {
                     onClick={() => loadCase(entry.caseId)}
                   >
                     <div className="case-link-top">
-                      <strong>{entry.caseName}</strong>
+                      <strong>{entry.businessName ?? entry.caseName}</strong>
                       <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
                         {workflowLabel[entry.workflow.status]}
                       </span>

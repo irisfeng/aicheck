@@ -71,6 +71,7 @@ export type AnalysisResponse = {
   createdAt?: string;
   updatedAt?: string;
   provider: string;
+  businessName: string;
   caseName: string;
   notes?: string;
   actor?: AuthUser;
@@ -90,6 +91,7 @@ export type AnalysisResponse = {
 
 export type CaseSummary = {
   caseId: string;
+  businessName: string;
   caseName: string;
   workflow: ReviewWorkflow;
   recommendedDecision: string;

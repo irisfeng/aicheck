@@ -304,6 +304,17 @@ function attachPersistenceMeta(payload, persistence) {
   };
 }
 
+function resolveBusinessName(...candidates) {
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 async function collectRequestFiles(req) {
   const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
 
@@ -464,22 +475,28 @@ export function createApiRouter() {
         return res.status(400).json({ error: "缺少 review 数据。" });
       }
 
-      const caseName = String(req.body?.caseName || reviewPayload.caseName || "").trim();
-      if (!caseName) {
-        return res.status(400).json({ error: "缺少案件名称。" });
+      const businessName = resolveBusinessName(
+        req.body?.businessName,
+        req.body?.caseName,
+        reviewPayload.businessName,
+        reviewPayload.caseName,
+      );
+      if (!businessName) {
+        return res.status(400).json({ error: "请先填写业务名称。" });
       }
 
       const notes = String(req.body?.notes || reviewPayload.notes || "");
       const workflow = normalizeWorkflow(reviewPayload.workflow);
       const persistence = await saveReviewCase({
         caseId: req.params.caseId,
-        caseName,
+        caseName: businessName,
         notes,
         provider: reviewPayload.provider || getProviderLabel(),
         actor: req.auth.user,
         reviewData: {
           ...reviewPayload,
-          caseName,
+          businessName,
+          caseName: businessName,
           notes,
           actor: req.auth.user,
           workflow,
@@ -523,7 +540,9 @@ export function createApiRouter() {
 
       const persistence = await saveReviewCase({
         caseId: req.params.caseId,
-        caseName: String(reviewCase.caseName || "").trim() || "语音业务接入审核案件",
+        caseName:
+          resolveBusinessName(reviewCase.businessName, reviewCase.caseName) ||
+          "未命名业务",
         notes: String(reviewCase.notes || ""),
         provider: reviewCase.provider || getProviderLabel(),
         actor: req.auth.user,
@@ -562,7 +581,9 @@ export function createApiRouter() {
 
       const persistence = await saveReviewCase({
         caseId: req.params.caseId,
-        caseName: String(reviewCase.caseName || "").trim() || "语音业务接入审核案件",
+        caseName:
+          resolveBusinessName(reviewCase.businessName, reviewCase.caseName) ||
+          "未命名业务",
         notes: String(reviewCase.notes || ""),
         provider: reviewCase.provider || getProviderLabel(),
         actor: req.auth.user,
@@ -590,7 +611,10 @@ export function createApiRouter() {
       const checklistPayload = await loadChecklist();
       const checklist = checklistPayload.items;
       const checklistCodes = new Set(checklist.map((item) => item.code));
-      const caseName = String(req.body.caseName || "语音业务接入审核案件");
+      const businessName = resolveBusinessName(req.body.businessName, req.body.caseName);
+      if (!businessName) {
+        return res.status(400).json({ error: "请先填写业务名称后再上传分析。" });
+      }
       const notes = String(req.body.notes || "");
       const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
       const files = await collectRequestFiles(req);
@@ -653,7 +677,7 @@ export function createApiRouter() {
       });
 
       const reviewResult = await reviewChecklist({
-        caseName,
+        caseName: businessName,
         notes,
         checklist,
         evidenceIndex,
@@ -682,7 +706,8 @@ export function createApiRouter() {
 
       const reviewPayload = {
         provider: getProviderLabel(),
-        caseName,
+        businessName,
+        caseName: businessName,
         notes,
         actor: req.auth.user,
         workflow:
@@ -697,7 +722,7 @@ export function createApiRouter() {
 
       const persistence = await saveReviewCase({
         caseId: String(req.body.caseId || "").trim() || undefined,
-        caseName,
+        caseName: businessName,
         notes,
         provider: getProviderLabel(),
         actor: req.auth.user,
