@@ -240,6 +240,21 @@ function buildRecommendedDecision(items, mandatoryItems) {
   };
 }
 
+function buildMandatoryCollection(checklist, items) {
+  const mandatoryItems = checklist.filter((item) => item.mandatory);
+  const resultMap = new Map((items || []).map((item) => [item.code, item]));
+  const missingItems = mandatoryItems.filter((item) => {
+    const result = resultMap.get(item.code);
+    return (result?.evidenceFiles?.length ?? 0) === 0;
+  });
+
+  return {
+    mandatoryCollectedCount: mandatoryItems.length - missingItems.length,
+    mandatoryReadyForExpert: missingItems.length === 0,
+    mandatoryMissingCodes: missingItems.map((item) => item.code),
+  };
+}
+
 function buildFallbackItem(item, directFiles) {
   const hasDirectFiles = directFiles.length > 0;
   return {
@@ -563,6 +578,18 @@ export function createApiRouter() {
         });
       }
 
+      const checklistPayload = await loadChecklist();
+      const mandatoryCollection = buildMandatoryCollection(
+        checklistPayload.items,
+        reviewCase.items || [],
+      );
+
+      if (!mandatoryCollection.mandatoryReadyForExpert) {
+        return res.status(400).json({
+          error: `必须项材料未齐，暂不可提交专家复审。仍缺：${mandatoryCollection.mandatoryMissingCodes.join("、")}`,
+        });
+      }
+
       const nextPayload = {
         ...reviewCase,
         actor: req.auth.user,
@@ -751,17 +778,25 @@ export function createApiRouter() {
         scanReportAssessment,
       });
       const mandatoryItems = checklist.filter((item) => item.mandatory);
+      const mandatoryCollection = buildMandatoryCollection(checklist, normalizedItems);
       const summary = {
         ...buildRecommendedDecision(normalizedItems, mandatoryItems),
+        ...mandatoryCollection,
         overview:
-          reviewResult.summary?.overview ??
-          `已完成 ${normalizedItems.length} 条审查项初判，其中必须项通过 ${
-            normalizedItems.filter(
-              (entry) =>
-                mandatoryItems.some((item) => item.code === entry.code) &&
-                entry.status === "pass",
-            ).length
-          }/${mandatoryItems.length}。`,
+          `${
+            reviewResult.summary?.overview ??
+            `已完成 ${normalizedItems.length} 条审查项初判，其中必须项通过 ${
+              normalizedItems.filter(
+                (entry) =>
+                  mandatoryItems.some((item) => item.code === entry.code) &&
+                  entry.status === "pass",
+              ).length
+            }/${mandatoryItems.length}。`
+          }${
+            mandatoryCollection.mandatoryReadyForExpert
+              ? " 必须项材料已齐套，已自动进入专家复审队列。"
+              : ` 必须项材料尚未齐套，暂不自动送专家；仍缺 ${mandatoryCollection.mandatoryMissingCodes.join("、")}。`
+          }`,
       };
 
       const reviewPayload = {
@@ -772,7 +807,9 @@ export function createApiRouter() {
         actor: req.auth.user,
         workflow:
           req.auth.user.role === "operator"
-            ? createPendingExpertWorkflow(req.auth.user)
+            ? mandatoryCollection.mandatoryReadyForExpert
+              ? createPendingExpertWorkflow(req.auth.user)
+              : normalizeWorkflow(undefined)
             : normalizeWorkflow(undefined),
         uploadedFiles,
         scanReport: scanReportAssessment,

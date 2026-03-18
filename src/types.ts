@@ -108,6 +108,9 @@ export type AnalysisResponse = {
     unresolvedCount: number;
     mandatoryPassCount: number;
     totalMandatoryCount: number;
+    mandatoryCollectedCount: number;
+    mandatoryReadyForExpert: boolean;
+    mandatoryMissingCodes: string[];
     overview: string;
   };
   scanReport?: SecurityScanAssessment;

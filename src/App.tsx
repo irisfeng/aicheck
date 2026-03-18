@@ -131,6 +131,7 @@ function computeSummary(items: ReviewItemResult[], overview: string) {
   const mandatoryCodes = new Set(
     checklistItems.filter((item) => item.mandatory).map((item) => item.code),
   );
+  const mandatoryRecords = checklistItems.filter((item) => item.mandatory);
   const blockerCount = items.filter(
     (item) => mandatoryCodes.has(item.code) && item.status === "fail",
   ).length;
@@ -140,6 +141,14 @@ function computeSummary(items: ReviewItemResult[], overview: string) {
   const mandatoryPassCount = items.filter(
     (item) => mandatoryCodes.has(item.code) && item.status === "pass",
   ).length;
+  const mandatoryMissingCodes = mandatoryRecords
+    .filter((item) => {
+      const result = items.find((entry) => entry.code === item.code);
+      return (result?.evidenceFiles?.length ?? 0) === 0;
+    })
+    .map((item) => item.code);
+  const mandatoryCollectedCount = mandatoryRecords.length - mandatoryMissingCodes.length;
+  const mandatoryReadyForExpert = mandatoryMissingCodes.length === 0;
 
   let recommendedDecision = "可进入人工终审";
   if (blockerCount > 0) {
@@ -158,6 +167,9 @@ function computeSummary(items: ReviewItemResult[], overview: string) {
     unresolvedCount,
     mandatoryPassCount,
     totalMandatoryCount: mandatoryCodes.size,
+    mandatoryCollectedCount,
+    mandatoryReadyForExpert,
+    mandatoryMissingCodes,
     overview,
   };
 }
@@ -293,6 +305,9 @@ function App() {
 
   const canExpertReview = authUser?.role === "expert";
   const currentWorkflow = normalizeWorkflow(analysis?.workflow);
+  const mandatoryCollectedCount = analysis?.summary.mandatoryCollectedCount ?? 0;
+  const mandatoryReadyForExpert = analysis?.summary.mandatoryReadyForExpert ?? false;
+  const mandatoryMissingCodes = analysis?.summary.mandatoryMissingCodes ?? [];
   const loadedBusinessName = String(
     analysis?.businessName ?? analysis?.caseName ?? "",
   ).trim();
@@ -311,6 +326,7 @@ function App() {
   const operatorCanSubmitToExpert =
     authUser?.role === "operator" &&
     Boolean(analysis?.caseId) &&
+    mandatoryReadyForExpert &&
     currentWorkflow.status !== "pending_expert_review";
   const expertCanCompleteReview =
     canExpertReview && Boolean(analysis?.caseId) && currentWorkflow.status !== "expert_reviewed";
@@ -578,6 +594,8 @@ function App() {
         : "请优先复核待处理项和必须项，确认后完成专家终审。"
     : !analysis
       ? "请先填写业务名称并上传本批材料。"
+      : !mandatoryReadyForExpert
+        ? `必须项材料尚未齐套，暂不进入专家复审。当前已收集 ${mandatoryCollectedCount}/${analysis?.summary.totalMandatoryCount ?? checklistPayload.summary.mandatory_items} 项。`
       : currentWorkflow.status === "pending_expert_review"
         ? "当前案件已自动进入专家复审队列，等待专家确认。"
         : scopedPendingCount > 0
@@ -1434,14 +1452,16 @@ function App() {
                 onClick={submitToExpertReview}
                 disabled={!operatorCanSubmitToExpert || isSubmittingToExpert}
               >
-                {currentWorkflow.status === "expert_reviewed"
+                {!mandatoryReadyForExpert
+                  ? "必须项未齐，暂不可提交专家"
+                  : currentWorkflow.status === "expert_reviewed"
                   ? isSubmittingToExpert
                     ? "重新提交中..."
                     : "重新提交专家复审"
                   : currentWorkflow.status === "pending_expert_review"
                     ? "已进入专家复审队列"
                     : isSubmittingToExpert
-                    ? "提交中..."
+                      ? "提交中..."
                       : "提交专家复审"}
               </button>
             ) : null}
@@ -1463,8 +1483,10 @@ function App() {
                 <p>{analysis.summary.recommendedDecision}</p>
               </article>
               <article className="result-card">
-                <span>待处理项</span>
-                <strong>{scopedPendingCount}</strong>
+                <span>必须项材料</span>
+                <strong>
+                  {mandatoryCollectedCount}/{analysis.summary.totalMandatoryCount}
+                </strong>
                 <p>{nextStepText}</p>
               </article>
               <article className="result-card">
@@ -1484,6 +1506,14 @@ function App() {
 
           {!trimmedBusinessName ? (
             <p className="hint sync-note">请先填写业务名称，再发起上传分析。</p>
+          ) : null}
+          {analysis?.caseId && !mandatoryReadyForExpert ? (
+            <p className="hint sync-note">
+              当前仍缺必须项材料：{mandatoryMissingCodes.slice(0, 6).join("、")}
+              {mandatoryMissingCodes.length > 6
+                ? ` 等 ${mandatoryMissingCodes.length} 项`
+                : ""}。补齐后系统才会自动进入专家复审队列。
+            </p>
           ) : null}
           {willCreateNewCase ? (
             <p className="hint sync-note">
@@ -1688,7 +1718,7 @@ function App() {
             <div className="summary-card">
               <p className="section-kicker">MVP Focus</p>
               <p>
-                操作员完成 AI 初判后案件会自动进入专家复审队列；专家账号负责人工覆盖、终审确认与结论导出。
+                仅当必须项材料齐套后，操作员分析结果才会自动进入专家复审队列；专家账号负责人工覆盖、终审确认与结论导出。
               </p>
             </div>
           )}
@@ -1940,7 +1970,7 @@ function App() {
                     ? "当前案件已进入专家复审队列，专家账号登录后可直接查看并完成终审。"
                     : currentWorkflow.status === "expert_reviewed"
                       ? "当前案件已完成专家终审；若操作员补充材料并重新分析，可再次送专家确认。"
-                      : "操作员完成 AI 初判后会自动进入专家复审队列，也支持手动重新提交专家复审。"}
+                      : "必须项材料齐套后，操作员分析结果才会自动进入专家复审队列；若仍缺必须项，需先补齐后再提交专家复审。"}
                 </p>
               </article>
 
