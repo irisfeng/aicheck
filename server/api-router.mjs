@@ -361,6 +361,47 @@ function resolveBusinessName(...candidates) {
   return "";
 }
 
+function normalizeUploadedFileRef(file) {
+  return {
+    fileName: String(file?.fileName || "").trim(),
+    mimeType: String(file?.mimeType || "application/octet-stream"),
+    size: Number(file?.size || 0),
+    objectKey: String(file?.objectKey || "").trim(),
+  };
+}
+
+function mergeUploadedFileRefs(existingFiles = [], incomingFiles = []) {
+  const merged = new Map();
+
+  for (const file of existingFiles.map(normalizeUploadedFileRef)) {
+    if (!file.fileName) continue;
+    merged.set(file.fileName, file);
+  }
+
+  for (const file of incomingFiles.map(normalizeUploadedFileRef)) {
+    if (!file.fileName) continue;
+    merged.set(file.fileName, file);
+  }
+
+  return Array.from(merged.values());
+}
+
+function mergeFilesByName(existingFiles = [], incomingFiles = []) {
+  const merged = new Map();
+
+  for (const file of existingFiles) {
+    if (!file?.originalname) continue;
+    merged.set(file.originalname, file);
+  }
+
+  for (const file of incomingFiles) {
+    if (!file?.originalname) continue;
+    merged.set(file.originalname, file);
+  }
+
+  return Array.from(merged.values());
+}
+
 async function collectRequestFiles(req) {
   const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
 
@@ -674,9 +715,10 @@ export function createApiRouter() {
         return res.status(400).json({ error: "请先填写业务名称后再上传分析。" });
       }
       const requestedCaseId = String(req.body.caseId || "").trim();
+      let existingCase = null;
       let caseIdForSave = requestedCaseId || undefined;
       if (requestedCaseId) {
-        const existingCase = await getReviewCase(requestedCaseId, req.auth.user);
+        existingCase = await getReviewCase(requestedCaseId, req.auth.user);
         const existingBusinessName = resolveBusinessName(
           existingCase?.businessName,
           existingCase?.caseName,
@@ -687,8 +729,29 @@ export function createApiRouter() {
         }
       }
       const notes = String(req.body.notes || "");
-      const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
-      const files = await collectRequestFiles(req);
+      const incomingUploadedFiles = Array.isArray(req.body?.uploadedFiles)
+        ? req.body.uploadedFiles
+        : [];
+      const currentBatchFiles = await collectRequestFiles(req);
+      const previousUploadedFiles =
+        caseIdForSave && existingCase && resolveBusinessName(existingCase.businessName, existingCase.caseName) === businessName
+          ? Array.isArray(existingCase.uploadedFiles)
+            ? existingCase.uploadedFiles.map(normalizeUploadedFileRef)
+            : []
+          : [];
+      const uploadedFiles = mergeUploadedFileRefs(previousUploadedFiles, incomingUploadedFiles);
+      const currentBatchFileNames = new Set(
+        currentBatchFiles.map((file) => file.originalname),
+      );
+      const previousFilesToRead =
+        isObjectStorageConfigured() && previousUploadedFiles.length > 0
+          ? previousUploadedFiles.filter((file) => !currentBatchFileNames.has(file.fileName))
+          : [];
+      const previousStoredFiles =
+        previousFilesToRead.length > 0
+          ? await readUploadedObjects(previousFilesToRead)
+          : [];
+      const files = mergeFilesByName(previousStoredFiles, currentBatchFiles);
 
       if (!Array.isArray(files) || files.length === 0) {
         return res.status(400).json({ error: "请至少上传一个文件。" });
@@ -701,8 +764,24 @@ export function createApiRouter() {
         process.env.DASHSCOPE_ENABLE_VISION_ENRICHMENT === "true" &&
         imageCount <= Math.max(1, inlineVisionLimit);
       const evidenceConcurrency = Number(process.env.ANALYZE_FILE_CONCURRENCY || 3);
+      const reusableEvidenceMap = new Map(
+        Array.isArray(existingCase?.evidences)
+          ? existingCase.evidences
+              .filter(
+                (evidence) =>
+                  evidence?.fileName && !currentBatchFileNames.has(evidence.fileName),
+              )
+              .map((evidence) => [evidence.fileName, evidence])
+          : [],
+      );
 
       const evidences = await mapWithConcurrency(files, evidenceConcurrency, async (file) => {
+        const reusableEvidence = reusableEvidenceMap.get(file.originalname);
+        if (reusableEvidence) {
+          fileMap.set(reusableEvidence.id, file);
+          return reusableEvidence;
+        }
+
         const routing = inferEvidenceRouting(file.originalname, checklistCodes);
         const evidenceId = `${file.originalname}-${file.size}-${Date.now()}-${Math.random()
           .toString(36)
@@ -738,8 +817,17 @@ export function createApiRouter() {
           summary: documentResult.summary,
         };
       });
+      const carriedEvidences = Array.isArray(existingCase?.evidences)
+        ? existingCase.evidences.filter(
+            (evidence) =>
+              evidence?.fileName &&
+              !currentBatchFileNames.has(evidence.fileName) &&
+              !evidences.some((entry) => entry.fileName === evidence.fileName),
+          )
+        : [];
+      const combinedEvidences = [...carriedEvidences, ...evidences];
 
-      const evidenceIndex = buildEvidenceIndex(checklist, evidences);
+      const evidenceIndex = buildEvidenceIndex(checklist, combinedEvidences);
       const scanReportEvidences = evidenceIndex.globalEvidences;
       const visionAssessments = await runMandatoryVisionRechecks({
         checklist,
@@ -813,7 +901,7 @@ export function createApiRouter() {
             : normalizeWorkflow(undefined),
         uploadedFiles,
         scanReport: scanReportAssessment,
-        evidences,
+        evidences: combinedEvidences,
         summary,
         items: normalizedItems,
       };

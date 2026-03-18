@@ -1435,6 +1435,12 @@ function App() {
               为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批先控制在 5 到 8 个文件。
             </p>
           ) : null}
+          {analysis?.caseId ? (
+            <p className="hint sync-note">
+              同一业务支持分批补件：后续上传会并入当前案件并基于累计材料重新分析。
+              当前已累计 {analysis.uploadedFiles?.length ?? 0} 个文件；如需切换到新业务，请点“新建案件”。
+            </p>
+          ) : null}
 
           <div className="action-row">
             <button
