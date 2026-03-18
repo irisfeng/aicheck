@@ -16,6 +16,7 @@ import type {
 
 const checklistItems = checklistPayload.items as ChecklistRecord[];
 const sessionStorageKey = "aicheck_session_token";
+const activeCaseStoragePrefix = "aicheck_active_case";
 type ResultView = "attention" | "matched" | "review" | "appendix";
 
 const statusLabel: Record<ReviewStatus, string> = {
@@ -586,6 +587,9 @@ function App() {
         ["appendix", "完整附录"],
       ];
   const currentBusinessName = analysis?.businessName || trimmedBusinessName || "未选择业务";
+  const activeCaseStorageKey = authUser
+    ? `${activeCaseStoragePrefix}:${authUser.role}:${authUser.username}`
+    : activeCaseStoragePrefix;
   const nextStepText = canExpertReview
     ? !analysis
       ? "请先从左侧选择一条待专家复审案件。"
@@ -635,6 +639,22 @@ function App() {
     }
   }, [canExpertReview, caseHistoryFilter]);
 
+  useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+
+    if (analysis?.caseId) {
+      window.localStorage.setItem(activeCaseStorageKey, analysis.caseId);
+      return;
+    }
+
+    const storedCaseId = window.localStorage.getItem(activeCaseStorageKey);
+    if (storedCaseId && !caseHistory.some((entry) => entry.caseId === storedCaseId)) {
+      window.localStorage.removeItem(activeCaseStorageKey);
+    }
+  }, [activeCaseStorageKey, analysis?.caseId, authUser, caseHistory]);
+
   async function refreshCases() {
     if (!authToken || !authUser) return;
 
@@ -660,6 +680,9 @@ function App() {
     setNotes("");
     setFiles([]);
     setError("");
+    if (authUser) {
+      window.localStorage.removeItem(activeCaseStorageKey);
+    }
     if (checklistItems[0]?.code) {
       setSelectedCode(checklistItems[0].code);
     }
@@ -813,6 +836,9 @@ function App() {
       setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? "");
       setFiles([]);
+      if (authUser) {
+        window.localStorage.setItem(activeCaseStorageKey, nextAnalysis.caseId);
+      }
       if (nextAnalysis.items?.[0]?.code) {
         setSelectedCode(nextAnalysis.items[0].code);
       }
@@ -822,7 +848,25 @@ function App() {
   }
 
   useEffect(() => {
-    if (!canExpertReview || analysis?.caseId || casesLoading || caseHistory.length === 0) {
+    if (analysis?.caseId || casesLoading || caseHistory.length === 0 || !authUser) {
+      return;
+    }
+
+    const storedCaseId = window.localStorage.getItem(activeCaseStorageKey);
+    const storedCase = storedCaseId
+      ? caseHistory.find((entry) => entry.caseId === storedCaseId)
+      : undefined;
+
+    if (storedCase) {
+      loadCase(storedCase.caseId);
+      return;
+    }
+
+    if (!canExpertReview) {
+      const mostRecentCase = caseHistory[0];
+      if (mostRecentCase) {
+        loadCase(mostRecentCase.caseId);
+      }
       return;
     }
 
@@ -837,7 +881,15 @@ function App() {
     if (firstPendingCase) {
       loadCase(firstPendingCase.caseId);
     }
-  }, [analysis?.caseId, canExpertReview, caseHistory, casesLoading, showSampleCases]);
+  }, [
+    activeCaseStorageKey,
+    analysis?.caseId,
+    authUser,
+    canExpertReview,
+    caseHistory,
+    casesLoading,
+    showSampleCases,
+  ]);
 
   async function submitToExpertReview() {
     if (!analysis?.caseId || authUser?.role !== "operator") return;
@@ -951,6 +1003,9 @@ function App() {
       setFiles([]);
       setCasesError("");
       window.localStorage.removeItem(sessionStorageKey);
+      if (authUser) {
+        window.localStorage.removeItem(activeCaseStorageKey);
+      }
     }
   }
 
