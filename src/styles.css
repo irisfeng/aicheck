@@ -129,10 +129,24 @@ button {
   margin-bottom: 18px;
 }
 
+.mechanism-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.mechanism-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .mechanism-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+  margin-top: 16px;
 }
 
 .mechanism-step {
@@ -555,6 +569,12 @@ button {
   margin: 12px 0 10px;
 }
 
+.checklist-toolbar {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 14px;
+}
+
 .archive-search {
   width: 100%;
   min-height: 42px;
@@ -604,6 +624,14 @@ button {
   margin: 0 0 14px;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.review-intro {
+  margin-top: 8px;
+}
+
+.checklist-stats {
+  margin-bottom: 0;
 }
 
 .summary-card h4,
@@ -660,6 +688,18 @@ button {
 .items {
   display: grid;
   gap: 12px;
+}
+
+.empty-card {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--line);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.empty-card strong {
+  display: block;
+  margin-bottom: 8px;
 }
 
 .item-row {

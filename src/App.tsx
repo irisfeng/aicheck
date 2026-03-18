@@ -106,6 +106,14 @@ function shortCaseId(value?: string) {
   return value.slice(0, 8);
 }
 
+function isAttentionStatus(status?: ReviewStatus) {
+  return (
+    status === "fail" ||
+    status === "insufficient_evidence" ||
+    status === "manual_review_required"
+  );
+}
+
 function computeSummary(items: ReviewItemResult[], overview: string) {
   const mandatoryCodes = new Set(
     checklistItems.filter((item) => item.mandatory).map((item) => item.code),
@@ -260,8 +268,10 @@ function App() {
   const [isCompletingExpertReview, setIsCompletingExpertReview] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<
-    "all" | "mandatory" | "blockers" | "unresolved"
+    "focus" | "all" | "mandatory" | "blockers" | "unresolved"
   >("all");
+  const [checklistQuery, setChecklistQuery] = useState("");
+  const [showMechanism, setShowMechanism] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [manualOverrides, setManualOverrides] = useState<
     Record<string, ReviewItemResult>
@@ -412,25 +422,50 @@ function App() {
       }
     );
   });
+  const resultMap = new Map(mergedItems.map((item) => [item.code, item]));
+  const linkedCodeSet = new Set(
+    (analysis?.evidences ?? []).flatMap((entry) => entry.linkedCodes ?? []),
+  );
+  const checklistKeyword = checklistQuery.trim().toLowerCase();
+
+  function hasEvidenceMatch(code: string) {
+    const result = resultMap.get(code);
+    return linkedCodeSet.has(code) || (result?.evidenceFiles?.length ?? 0) > 0;
+  }
+
+  function isFocusItem(code: string) {
+    const result = resultMap.get(code);
+    return hasEvidenceMatch(code) || isAttentionStatus(result?.status);
+  }
 
   const filteredItems = checklistItems.filter((item) => {
-    const result = mergedItems.find((entry) => entry.code === item.code);
+    const result = resultMap.get(item.code);
     if (!result) return true;
-    if (filter === "mandatory") return item.mandatory;
-    if (filter === "blockers") return item.mandatory && result.status === "fail";
+    if (analysis && filter === "focus" && !isFocusItem(item.code)) {
+      return false;
+    }
+    if (filter === "mandatory" && !item.mandatory) {
+      return false;
+    }
+    if (filter === "blockers") {
+      if (!(item.mandatory && (result.status === "fail" || result.status === "insufficient_evidence"))) {
+        return false;
+      }
+    }
     if (filter === "unresolved") {
-      return (
-        result.status === "insufficient_evidence" ||
-        result.status === "manual_review_required" ||
-        result.status === "pending"
-      );
+      if (!(isAttentionStatus(result.status) || (hasEvidenceMatch(item.code) && result.status === "pending"))) {
+        return false;
+      }
+    }
+    if (checklistKeyword) {
+      const searchTarget = [item.code, item.requirement, item.category].join(" ").toLowerCase();
+      return searchTarget.includes(checklistKeyword);
     }
     return true;
   });
 
   const selectedChecklist = checklistItems.find((item) => item.code === selectedCode);
-  const selectedResult =
-    mergedItems.find((item) => item.code === selectedCode) ?? mergedItems[0];
+  const selectedResult = resultMap.get(selectedCode) ?? mergedItems[0];
 
   const statBlockers = mergedItems.filter(
     (item, index) =>
@@ -443,6 +478,11 @@ function App() {
       item.status === "manual_review_required" ||
       item.status === "insufficient_evidence",
   ).length;
+  const focusItemCount = checklistItems.filter((item) => isFocusItem(item.code)).length;
+  const scopedPendingCount = checklistItems.filter((item) => {
+    const result = resultMap.get(item.code);
+    return isAttentionStatus(result?.status) || (hasEvidenceMatch(item.code) && result?.status === "pending");
+  }).length;
   const archiveKeyword = caseHistoryQuery.trim().toLowerCase();
   const filteredCaseHistory = caseHistory.filter((entry) => {
     const workflowMatches =
@@ -481,6 +521,21 @@ function App() {
     recent: recentCases.length,
     earlier: earlierCases.length,
   };
+
+  useEffect(() => {
+    if (analysis?.caseId) {
+      setFilter("focus");
+      setChecklistQuery("");
+    } else {
+      setFilter("all");
+    }
+  }, [analysis?.caseId]);
+
+  useEffect(() => {
+    if (!filteredItems.some((item) => item.code === selectedCode) && filteredItems[0]?.code) {
+      setSelectedCode(filteredItems[0].code);
+    }
+  }, [filteredItems, selectedCode]);
 
   async function refreshCases() {
     if (!authToken || !authUser) return;
@@ -1035,46 +1090,59 @@ function App() {
             <p className="section-kicker">Review Flow</p>
             <h3>审查工作机制</h3>
           </div>
-          <span className="soft-badge">AI 初判 + 专家终审</span>
+          <div className="mechanism-actions">
+            <span className="soft-badge">AI 初判 + 专家终审</span>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => setShowMechanism((current) => !current)}
+            >
+              {showMechanism ? "收起流程详情" : "查看流程详情"}
+            </button>
+          </div>
         </div>
+        <p className="mechanism-summary">
+          默认流程：材料归档 → 证据抽取 → 必须项复判 → 专家终审。日常使用时可直接聚焦下方上传与审查结果。
+        </p>
+        {showMechanism ? (
+          <div className="mechanism-grid">
+            <article className="mechanism-step">
+              <span className="mechanism-index">01</span>
+              <h4>材料归档</h4>
+              <p>
+                按审查项编号上传截图和文档，系统优先依据文件名前缀完成自动归档，
+                <code>安扫报告</code> 作为全局证据参与比对。
+              </p>
+            </article>
 
-        <div className="mechanism-grid">
-          <article className="mechanism-step">
-            <span className="mechanism-index">01</span>
-            <h4>材料归档</h4>
-            <p>
-              按审查项编号上传截图和文档，系统优先依据文件名前缀完成自动归档，
-              <code>安扫报告</code> 作为全局证据参与比对。
-            </p>
-          </article>
+            <article className="mechanism-step">
+              <span className="mechanism-index">02</span>
+              <h4>证据抽取</h4>
+              <p>
+                图片先做 OCR，文档提取正文内容，保留命中的文件名、摘要和原始文本，
+                作为逐条审查的基础证据。
+              </p>
+            </article>
 
-          <article className="mechanism-step">
-            <span className="mechanism-index">02</span>
-            <h4>证据抽取</h4>
-            <p>
-              图片先做 OCR，文档提取正文内容，保留命中的文件名、摘要和原始文本，
-              作为逐条审查的基础证据。
-            </p>
-          </article>
+            <article className="mechanism-step">
+              <span className="mechanism-index">03</span>
+              <h4>必须项复判</h4>
+              <p>
+                必须项在命中截图时追加视觉模型复判。若 OCR 与视觉结论冲突，
+                系统默认保留更保守的结果，证据不足不直接判通过。
+              </p>
+            </article>
 
-          <article className="mechanism-step">
-            <span className="mechanism-index">03</span>
-            <h4>必须项复判</h4>
-            <p>
-              必须项在命中截图时追加视觉模型复判。若 OCR 与视觉结论冲突，
-              系统默认保留更保守的结果，证据不足不直接判通过。
-            </p>
-          </article>
-
-          <article className="mechanism-step">
-            <span className="mechanism-index">04</span>
-            <h4>专家终审</h4>
-            <p>
-              专家账号重点复核阻断项和证据不足项，可人工覆盖结论，
-              并输出带依据、整改项和参考做法的审核结果。
-            </p>
-          </article>
-        </div>
+            <article className="mechanism-step">
+              <span className="mechanism-index">04</span>
+              <h4>专家终审</h4>
+              <p>
+                专家账号重点复核阻断项和证据不足项，可人工覆盖结论，
+                并输出带依据、整改项和参考做法的审核结果。
+              </p>
+            </article>
+          </div>
+        ) : null}
       </section>
 
       <section className="intake-panel">
@@ -1236,27 +1304,9 @@ function App() {
         <aside className="navigator panel">
           <div className="panel-head">
             <div>
-              <p className="section-kicker">Filters</p>
-              <h3>审查视图</h3>
+              <p className="section-kicker">Archive</p>
+              <h3>历史案件</h3>
             </div>
-          </div>
-
-          <div className="filter-row">
-            {[
-              ["all", "全部"],
-              ["mandatory", "必须项"],
-              ["blockers", "阻断项"],
-              ["unresolved", "待处理"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={filter === value ? "filter-pill active" : "filter-pill"}
-                onClick={() => setFilter(value as typeof filter)}
-              >
-                {label}
-              </button>
-            ))}
           </div>
 
           <div className="summary-card">
@@ -1389,12 +1439,22 @@ function App() {
           </div>
 
           <div className="category-list">
-            {Object.entries(checklistPayload.summary.categories).map(([category, count]) => (
-              <article className="category-card" key={category}>
-                <span>{category}</span>
-                <strong>{count}</strong>
-              </article>
-            ))}
+            <article className="category-card">
+              <span>本次命中</span>
+              <strong>{focusItemCount}</strong>
+            </article>
+            <article className="category-card">
+              <span>待处理</span>
+              <strong>{scopedPendingCount}</strong>
+            </article>
+            <article className="category-card">
+              <span>必须项</span>
+              <strong>{checklistPayload.summary.mandatory_items}</strong>
+            </article>
+            <article className="category-card">
+              <span>当前视图</span>
+              <strong>{filteredItems.length}</strong>
+            </article>
           </div>
 
           {analysis ? (
@@ -1431,36 +1491,93 @@ function App() {
               <p className="section-kicker">Checklist</p>
               <h3>逐条审查</h3>
             </div>
-            <span className="soft-badge">{filteredItems.length} items</span>
+            <span className="soft-badge">
+              {filteredItems.length} / {checklistItems.length}
+            </span>
+          </div>
+          <p className="hint review-intro">
+            默认聚焦本次有证据或已产出结论的条目；切换“全部”可查看完整清单。
+          </p>
+
+          <div className="checklist-toolbar">
+            <input
+              className="archive-search"
+              value={checklistQuery}
+              placeholder="搜索审查项编号、要求或分类"
+              onChange={(event) => setChecklistQuery(event.target.value)}
+            />
+            <div className="archive-stats checklist-stats">
+              <article className="archive-stat">
+                <span>本次命中</span>
+                <strong>{focusItemCount}</strong>
+              </article>
+              <article className="archive-stat">
+                <span>待处理</span>
+                <strong>{scopedPendingCount}</strong>
+              </article>
+              <article className="archive-stat">
+                <span>当前显示</span>
+                <strong>{filteredItems.length}</strong>
+              </article>
+            </div>
           </div>
 
-          <div className="items">
-            {filteredItems.map((item) => {
-              const result = mergedItems.find((entry) => entry.code === item.code);
-              const tone = statusTone[result?.status ?? "pending"];
-              return (
-                <button
-                  type="button"
-                  key={item.code}
-                  className={selectedCode === item.code ? "item-row active" : "item-row"}
-                  onClick={() => setSelectedCode(item.code)}
-                >
-                  <div className="item-topline">
-                    <span className="item-code">{item.code}</span>
-                    {item.mandatory ? <span className="must-tag">必须</span> : null}
-                    <span className={`status-tag ${tone}`}>
-                      {statusLabel[result?.status ?? "pending"]}
-                    </span>
-                  </div>
-                  <p>{item.requirement}</p>
-                  <div className="item-meta">
-                    <span>{item.category}</span>
-                    <span>置信度 {result?.confidence ?? 0}</span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="filter-row">
+            {[
+              ["focus", "本次命中"],
+              ["all", "全部"],
+              ["mandatory", "必须项"],
+              ["blockers", "阻断项"],
+              ["unresolved", "待处理"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={filter === value ? "filter-pill active" : "filter-pill"}
+                onClick={() => setFilter(value as typeof filter)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+
+          {filteredItems.length > 0 ? (
+            <div className="items">
+              {filteredItems.map((item) => {
+                const result = resultMap.get(item.code);
+                const tone = statusTone[result?.status ?? "pending"];
+                return (
+                  <button
+                    type="button"
+                    key={item.code}
+                    className={selectedCode === item.code ? "item-row active" : "item-row"}
+                    onClick={() => setSelectedCode(item.code)}
+                  >
+                    <div className="item-topline">
+                      <span className="item-code">{item.code}</span>
+                      {item.mandatory ? <span className="must-tag">必须</span> : null}
+                      {hasEvidenceMatch(item.code) ? (
+                        <span className="soft-badge">已命中材料</span>
+                      ) : null}
+                      <span className={`status-tag ${tone}`}>
+                        {statusLabel[result?.status ?? "pending"]}
+                      </span>
+                    </div>
+                    <p>{item.requirement}</p>
+                    <div className="item-meta">
+                      <span>{item.category}</span>
+                      <span>置信度 {result?.confidence ?? 0}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="empty-card">
+              <strong>当前筛选下没有命中条目</strong>
+              <p>可切换到“本次命中”或“全部”，也可以调整搜索关键词重新查看。</p>
+            </div>
+          )}
         </section>
 
         <aside className="detail panel">
