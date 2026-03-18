@@ -255,6 +255,10 @@ button {
   margin-bottom: 22px;
 }
 
+.review-control-panel {
+  margin-bottom: 22px;
+}
+
 .panel {
   border-radius: 26px;
   padding: 22px;
@@ -605,6 +609,43 @@ button {
   margin-top: 18px;
 }
 
+.result-rail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.result-rail.compact {
+  margin-bottom: 16px;
+}
+
+.result-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.result-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+}
+
+.result-card strong {
+  display: block;
+  font-size: 1.1rem;
+  line-height: 1.35;
+}
+
+.result-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .archive-toolbar {
   margin: 12px 0 10px;
 }
@@ -882,6 +923,7 @@ button {
   .evidence-grid,
   .hero,
   .hero-rail,
+  .result-rail,
   .intake-grid,
   .login-role-grid {
     grid-template-columns: 1fr;

@@ -16,6 +16,7 @@ import type {
 
 const checklistItems = checklistPayload.items as ChecklistRecord[];
 const sessionStorageKey = "aicheck_session_token";
+type ResultView = "attention" | "matched" | "review" | "appendix";
 
 const statusLabel: Record<ReviewStatus, string> = {
   pending: "待分析",
@@ -269,11 +270,10 @@ function App() {
   const [isSubmittingToExpert, setIsSubmittingToExpert] = useState(false);
   const [isCompletingExpertReview, setIsCompletingExpertReview] = useState(false);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<
-    "focus" | "all" | "mandatory" | "blockers" | "unresolved"
-  >("all");
+  const [resultView, setResultView] = useState<ResultView>("appendix");
   const [checklistQuery, setChecklistQuery] = useState("");
   const [showMechanism, setShowMechanism] = useState(false);
+  const [showEvidencePanel, setShowEvidencePanel] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [manualOverrides, setManualOverrides] = useState<
     Record<string, ReviewItemResult>
@@ -441,30 +441,34 @@ function App() {
     return hasEvidenceMatch(code) || isAttentionStatus(result?.status);
   }
 
-  const filteredItems = checklistItems.filter((item) => {
+  const attentionItems = checklistItems.filter((item) => {
     const result = resultMap.get(item.code);
-    if (!result) return true;
-    if (analysis && filter === "focus" && !isFocusItem(item.code)) {
-      return false;
-    }
-    if (filter === "mandatory" && !item.mandatory) {
-      return false;
-    }
-    if (filter === "blockers") {
-      if (!(item.mandatory && (result.status === "fail" || result.status === "insufficient_evidence"))) {
-        return false;
-      }
-    }
-    if (filter === "unresolved") {
-      if (!(isAttentionStatus(result.status) || (hasEvidenceMatch(item.code) && result.status === "pending"))) {
-        return false;
-      }
-    }
-    if (checklistKeyword) {
-      const searchTarget = [item.code, item.requirement, item.category].join(" ").toLowerCase();
-      return searchTarget.includes(checklistKeyword);
-    }
-    return true;
+    return isAttentionStatus(result?.status) || (hasEvidenceMatch(item.code) && result?.status === "pending");
+  });
+  const matchedItems = checklistItems.filter((item) => hasEvidenceMatch(item.code));
+  const mandatoryMatchedItems = checklistItems.filter(
+    (item) => item.mandatory && hasEvidenceMatch(item.code),
+  );
+  const expertReviewItems =
+    attentionItems.length > 0
+      ? attentionItems
+      : mandatoryMatchedItems.length > 0
+        ? mandatoryMatchedItems
+        : matchedItems.length > 0
+          ? matchedItems
+          : checklistItems;
+  const baseResultItems =
+    resultView === "attention"
+      ? attentionItems
+      : resultView === "matched"
+        ? matchedItems
+        : resultView === "review"
+          ? expertReviewItems
+          : checklistItems;
+  const filteredItems = baseResultItems.filter((item) => {
+    if (!checklistKeyword) return true;
+    const searchTarget = [item.code, item.requirement, item.category].join(" ").toLowerCase();
+    return searchTarget.includes(checklistKeyword);
   });
 
   const selectedChecklist = analysis
@@ -484,10 +488,7 @@ function App() {
       item.status === "insufficient_evidence",
   ).length;
   const focusItemCount = checklistItems.filter((item) => isFocusItem(item.code)).length;
-  const scopedPendingCount = checklistItems.filter((item) => {
-    const result = resultMap.get(item.code);
-    return isAttentionStatus(result?.status) || (hasEvidenceMatch(item.code) && result?.status === "pending");
-  }).length;
+  const scopedPendingCount = attentionItems.length;
   const archiveKeyword = caseHistoryQuery.trim().toLowerCase();
   const hiddenSampleCaseCount = caseHistory.filter((entry) =>
     isSampleCaseName(entry.businessName ?? entry.caseName),
@@ -538,21 +539,68 @@ function App() {
     reviewed: reviewedCases.length,
   };
   const scanReport = analysis?.scanReport as SecurityScanAssessment | undefined;
+  const expertQueueCases = filteredCaseHistory.filter(
+    (entry) => entry.workflow.status === "pending_expert_review",
+  );
+  const reviewPanelTitle = canExpertReview ? "专家复核重点" : "本次审核结果";
+  const reviewTabOptions: Array<[ResultView, string]> = canExpertReview
+    ? [
+        ["review", "待复核"],
+        ["matched", "已命中"],
+        ["appendix", "完整附录"],
+      ]
+    : [
+        ["attention", "待处理"],
+        ["matched", "已命中"],
+        ["appendix", "完整附录"],
+      ];
+  const currentBusinessName = analysis?.businessName || trimmedBusinessName || "未选择业务";
+  const nextStepText = canExpertReview
+    ? !analysis
+      ? "请先从左侧选择一条待专家复审案件。"
+      : currentWorkflow.status === "expert_reviewed"
+        ? "当前案件已完成终审，可回看问题项或导出结论。"
+        : "请优先复核待处理项和必须项，确认后完成专家终审。"
+    : !analysis
+      ? "请先填写业务名称并上传本批材料。"
+      : currentWorkflow.status === "pending_expert_review"
+        ? "当前案件已自动进入专家复审队列，等待专家确认。"
+        : scopedPendingCount > 0
+          ? "请优先补齐问题项或证据不足项，再提交专家复审。"
+          : "本次结果已生成，可直接提交专家复审。";
+  const viewDescription = canExpertReview
+    ? "默认只展示当前案件最需要专家处理的条目；完整清单作为附录按需查看。"
+    : "默认只展示当前业务的待处理项；其余命中项和完整清单按需查看。";
 
   useEffect(() => {
     if (analysis?.caseId) {
-      setFilter(scopedPendingCount > 0 ? "unresolved" : "focus");
+      setResultView(
+        canExpertReview
+          ? "review"
+          : scopedPendingCount > 0
+            ? "attention"
+            : matchedItems.length > 0
+              ? "matched"
+              : "appendix",
+      );
       setChecklistQuery("");
+      setShowEvidencePanel(false);
     } else {
-      setFilter("all");
+      setResultView(canExpertReview ? "review" : "appendix");
     }
-  }, [analysis?.caseId, scopedPendingCount]);
+  }, [analysis?.caseId, canExpertReview, matchedItems.length, scopedPendingCount]);
 
   useEffect(() => {
     if (!filteredItems.some((item) => item.code === selectedCode) && filteredItems[0]?.code) {
       setSelectedCode(filteredItems[0].code);
     }
   }, [filteredItems, selectedCode]);
+
+  useEffect(() => {
+    if (canExpertReview && caseHistoryFilter === "all") {
+      setCaseHistoryFilter("pending_expert_review");
+    }
+  }, [canExpertReview, caseHistoryFilter]);
 
   async function refreshCases() {
     if (!authToken || !authUser) return;
@@ -727,6 +775,24 @@ function App() {
       setError(loadError instanceof Error ? loadError.message : "读取案件详情失败。");
     }
   }
+
+  useEffect(() => {
+    if (!canExpertReview || analysis?.caseId || casesLoading || caseHistory.length === 0) {
+      return;
+    }
+
+    const firstPendingCase = caseHistory.find((entry) => {
+      if (!showSampleCases && isSampleCaseName(entry.businessName ?? entry.caseName)) {
+        return false;
+      }
+
+      return entry.workflow.status === "pending_expert_review";
+    });
+
+    if (firstPendingCase) {
+      loadCase(firstPendingCase.caseId);
+    }
+  }, [analysis?.caseId, canExpertReview, caseHistory, casesLoading, showSampleCases]);
 
   async function submitToExpertReview() {
     if (!analysis?.caseId || authUser?.role !== "operator") return;
@@ -1186,120 +1252,47 @@ function App() {
         ) : null}
       </section>
 
-      <section className="intake-panel">
-        <div className="intake-head">
-          <div>
-            <p className="section-kicker">Case Intake</p>
-            <h2>上传材料并发起预审</h2>
-          </div>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={exportSummary}
-            disabled={!canExpertReview}
-          >
-            导出当前结论
-          </button>
-        </div>
-
-        <div className="intake-grid">
-          <label className="field">
-            <span>业务名称</span>
-            <input
-              value={businessName}
-              placeholder="请填写业务名称，如：语音网关接入"
-              onChange={(event) => setBusinessName(event.target.value)}
-            />
-          </label>
-
-          <p className="uploader-note field-wide">
-            请先填写业务名称。后续上传分析、案件保存、专家复审与导出结果都会基于该业务名称流转。
-          </p>
-
-          <label className="field field-wide">
-            <span>审核备注 / 补充要求</span>
-            <textarea
-              rows={4}
-              value={notes}
-              placeholder="优先关注黄底必须项；若证据不足，宁可判为待人工复核。"
-              onChange={(event) => setNotes(event.target.value)}
-            />
-          </label>
-
-          <label className="uploader field-wide">
-            <input
-              type="file"
-              multiple
-              accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.md,.json"
-              onChange={(event) => updateFiles(event.target.files)}
-            />
-            <strong>拖拽或点击上传材料</strong>
-            <span>
-              支持图片、PDF、DOCX、TXT、MD、JSON，系统会优先按审查项编号前缀自动归档。
-            </span>
-          </label>
-          <div className="uploader-note field-wide">
-            <ul className="upload-rules">
-              <li>建议每次先传 5 到 8 个文件，文件较多时分批上传。</li>
-              <li>文件名建议以审查项编号开头，如 <code>2.8.1.1-1.png</code>。</li>
-              <li>单个文件不超过 15MB，不支持 ZIP。</li>
-              <li>关键证据优先传独立图片，Word / PDF 作为补充材料。</li>
-            </ul>
-          </div>
-        </div>
-
-        {files.length > 0 ? (
-          <div className="file-strip">
-            {files.map((file) => (
-              <article className="file-pill" key={file.name + file.size}>
-                <strong>{file.name}</strong>
-                <span>{Math.max(file.size / 1024, 1).toFixed(1)} KB</span>
-              </article>
-            ))}
-          </div>
-        ) : null}
-
-        {batchRecommendation ? (
-          <p className="batch-warning">
-            当前批次共 {batchRecommendation.totalFiles} 个文件，其中图片{" "}
-            {batchRecommendation.imageCount} 张，覆盖约 {batchRecommendation.distinctCodes || "多"} 个审查项。
-            为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批先控制在 5 到 8 个文件。
-          </p>
-        ) : null}
-
-        <div className="action-row">
-          <button
-            className="primary-button"
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting || !trimmedBusinessName}
-          >
-            {isSubmitting ? "分析中..." : "开始分析"}
-          </button>
-          {authUser?.role === "operator" && analysis?.caseId ? (
+      {canExpertReview ? (
+        <section className="review-control-panel panel">
+          <div className="panel-head">
+            <div>
+              <p className="section-kicker">Expert Desk</p>
+              <h3>专家复审工作台</h3>
+            </div>
             <button
               className="ghost-button"
               type="button"
-              onClick={submitToExpertReview}
-              disabled={!operatorCanSubmitToExpert || isSubmittingToExpert}
+              onClick={exportSummary}
+              disabled={!analysis}
             >
-              {currentWorkflow.status === "expert_reviewed"
-                ? isSubmittingToExpert
-                  ? "重新提交中..."
-                  : "重新提交专家复审"
-                : currentWorkflow.status === "pending_expert_review"
-                  ? "已进入专家复审队列"
-                  : isSubmittingToExpert
-                    ? "提交中..."
-                    : "提交专家复审"}
+              导出当前结论
             </button>
-          ) : null}
-          {canExpertReview && analysis?.caseId ? (
+          </div>
+
+          <div className="result-rail">
+            <article className="result-card">
+              <span>待复审案件</span>
+              <strong>{expertQueueCases.length}</strong>
+              <p>左侧默认只显示待专家处理的业务。</p>
+            </article>
+            <article className="result-card">
+              <span>当前业务</span>
+              <strong>{currentBusinessName}</strong>
+              <p>{analysis ? analysis.summary.recommendedDecision : "先从左侧选择一条待复审案件。"}</p>
+            </article>
+            <article className="result-card">
+              <span>下一步</span>
+              <strong>{currentWorkflow.status === "expert_reviewed" ? "已终审" : "待复核"}</strong>
+              <p>{nextStepText}</p>
+            </article>
+          </div>
+
+          <div className="action-row">
             <button
               className="ghost-button"
               type="button"
               onClick={completeExpertReview}
-              disabled={!expertCanCompleteReview || isCompletingExpertReview}
+              disabled={!analysis?.caseId || !expertCanCompleteReview || isCompletingExpertReview}
             >
               {currentWorkflow.status === "expert_reviewed"
                 ? "专家终审已完成"
@@ -1307,40 +1300,163 @@ function App() {
                   ? "终审提交中..."
                   : "标记专家终审完成"}
             </button>
+            <p className="hint">
+              专家默认只看待复核项、问题项和必须项；完整清单仅在需要追溯时查看。
+            </p>
+          </div>
+
+          {analysis?.caseId ? (
+            <p className="hint sync-note">
+              当前案件：{analysis.businessName} · {analysis.caseId} · 最后更新于{" "}
+              {formatDateTime(analysis.updatedAt)}。
+              {isSavingReview ? " 正在同步人工复核结果..." : ""}
+            </p>
+          ) : (
+            <p className="hint sync-note">请先从左侧“审核中项目”选择一条待专家复审案件。</p>
+          )}
+
+          {error ? <p className="error-banner">{error}</p> : null}
+        </section>
+      ) : (
+        <section className="intake-panel">
+          <div className="intake-head">
+            <div>
+              <p className="section-kicker">Case Intake</p>
+              <h2>上传材料并发起预审</h2>
+            </div>
+          </div>
+
+          <div className="intake-grid">
+            <label className="field">
+              <span>业务名称</span>
+              <input
+                value={businessName}
+                placeholder="请填写业务名称，如：语音网关接入"
+                onChange={(event) => setBusinessName(event.target.value)}
+              />
+            </label>
+
+            <p className="uploader-note field-wide">
+              请先填写业务名称。后续上传分析、案件保存、专家复审与导出结果都会基于该业务名称流转。
+            </p>
+
+            <label className="field field-wide">
+              <span>审核备注 / 补充要求</span>
+              <textarea
+                rows={4}
+                value={notes}
+                placeholder="优先关注黄底必须项；若证据不足，宁可判为待人工复核。"
+                onChange={(event) => setNotes(event.target.value)}
+              />
+            </label>
+
+            <label className="uploader field-wide">
+              <input
+                type="file"
+                multiple
+                accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.md,.json"
+                onChange={(event) => updateFiles(event.target.files)}
+              />
+              <strong>拖拽或点击上传材料</strong>
+              <span>
+                支持图片、PDF、DOCX、TXT、MD、JSON，系统会优先按审查项编号前缀自动归档。
+              </span>
+            </label>
+            <div className="uploader-note field-wide">
+              <ul className="upload-rules">
+                <li>建议每次先传 5 到 8 个文件，文件较多时分批上传。</li>
+                <li>文件名建议以审查项编号开头，如 <code>2.8.1.1-1.png</code>。</li>
+                <li>单个文件不超过 15MB，不支持 ZIP。</li>
+                <li>关键证据优先传独立图片，Word / PDF 作为补充材料。</li>
+              </ul>
+            </div>
+          </div>
+
+          {files.length > 0 ? (
+            <div className="file-strip">
+              {files.map((file) => (
+                <article className="file-pill" key={file.name + file.size}>
+                  <strong>{file.name}</strong>
+                  <span>{Math.max(file.size / 1024, 1).toFixed(1)} KB</span>
+                </article>
+              ))}
+            </div>
           ) : null}
-          <p className="hint">
-            默认调用链路：<code>qwen-vl-ocr</code> -&gt; <code>qwen-flash</code>。当前视觉增强复判使用 <code>qwen3-vl-plus</code>。
-          </p>
-        </div>
 
-        {analysis?.caseId ? (
-          <p className="hint sync-note">
-            当前案件已持久化保存：{analysis.caseId}，最后更新于 {formatDateTime(analysis.updatedAt)}。
-            {isSavingReview ? " 正在同步人工复核结果..." : ""}
-          </p>
-        ) : null}
+          {batchRecommendation ? (
+            <p className="batch-warning">
+              当前批次共 {batchRecommendation.totalFiles} 个文件，其中图片{" "}
+              {batchRecommendation.imageCount} 张，覆盖约 {batchRecommendation.distinctCodes || "多"} 个审查项。
+              为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批先控制在 5 到 8 个文件。
+            </p>
+          ) : null}
 
-        {analysis?.caseId ? (
-          <p className="hint sync-note">
-            工作流状态：
-            <span className={`status-tag ${workflowTone[currentWorkflow.status]}`}>
-              {workflowLabel[currentWorkflow.status]}
-            </span>
-            {currentWorkflow.submittedToExpertAt
-              ? ` 送审时间 ${formatDateTime(currentWorkflow.submittedToExpertAt)}`
-              : ""}
-            {currentWorkflow.expertReviewedAt
-              ? `，终审完成 ${formatDateTime(currentWorkflow.expertReviewedAt)}`
-              : ""}
-          </p>
-        ) : null}
+          <div className="action-row">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleSubmit}
+              disabled={isSubmitting || !trimmedBusinessName}
+            >
+              {isSubmitting ? "分析中..." : "开始分析"}
+            </button>
+            {analysis?.caseId ? (
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={submitToExpertReview}
+                disabled={!operatorCanSubmitToExpert || isSubmittingToExpert}
+              >
+                {currentWorkflow.status === "expert_reviewed"
+                  ? isSubmittingToExpert
+                    ? "重新提交中..."
+                    : "重新提交专家复审"
+                  : currentWorkflow.status === "pending_expert_review"
+                    ? "已进入专家复审队列"
+                    : isSubmittingToExpert
+                      ? "提交中..."
+                      : "提交专家复审"}
+              </button>
+            ) : null}
+            <p className="hint">
+              默认调用链路：<code>qwen-vl-ocr</code> -&gt; <code>qwen-flash</code>。当前视觉增强复判使用 <code>qwen3-vl-plus</code>。
+            </p>
+          </div>
 
-        {!trimmedBusinessName ? (
-          <p className="hint sync-note">请先填写业务名称，再发起上传分析。</p>
-        ) : null}
+          {analysis?.caseId ? (
+            <div className="result-rail compact">
+              <article className="result-card">
+                <span>当前业务</span>
+                <strong>{analysis.businessName}</strong>
+                <p>{analysis.summary.recommendedDecision}</p>
+              </article>
+              <article className="result-card">
+                <span>待处理项</span>
+                <strong>{scopedPendingCount}</strong>
+                <p>{nextStepText}</p>
+              </article>
+              <article className="result-card">
+                <span>当前流程</span>
+                <strong>{workflowLabel[currentWorkflow.status]}</strong>
+                <p>{currentWorkflow.submittedToExpertAt ? `已送审 ${formatDateTime(currentWorkflow.submittedToExpertAt)}` : "尚未提交专家复审"}</p>
+              </article>
+            </div>
+          ) : null}
 
-        {error ? <p className="error-banner">{error}</p> : null}
-      </section>
+          {analysis?.caseId ? (
+            <p className="hint sync-note">
+              当前案件已持久化保存：{analysis.caseId}，最后更新于 {formatDateTime(analysis.updatedAt)}。
+              {isSavingReview ? " 正在同步人工复核结果..." : ""}
+            </p>
+          ) : null}
+
+          {!trimmedBusinessName ? (
+            <p className="hint sync-note">请先填写业务名称，再发起上传分析。</p>
+          ) : null}
+
+          {error ? <p className="error-banner">{error}</p> : null}
+        </section>
+      )}
 
       <section className="workspace">
         <aside className="navigator panel">
@@ -1593,7 +1709,7 @@ function App() {
           <div className="panel-head">
             <div>
               <p className="section-kicker">Review Result</p>
-              <h3>审核结果</h3>
+              <h3>{reviewPanelTitle}</h3>
             </div>
             <span className="soft-badge">
               {analysis ? `${filteredItems.length} / ${checklistItems.length}` : "等待分析"}
@@ -1601,8 +1717,26 @@ function App() {
           </div>
           {analysis ? (
             <>
+              <div className="result-rail compact">
+                <article className="result-card">
+                  <span>当前业务</span>
+                  <strong>{analysis.businessName}</strong>
+                  <p>{analysis.summary.recommendedDecision}</p>
+                </article>
+                <article className="result-card">
+                  <span>{canExpertReview ? "待复核项" : "待处理项"}</span>
+                  <strong>{canExpertReview ? expertReviewItems.length : attentionItems.length}</strong>
+                  <p>{nextStepText}</p>
+                </article>
+                <article className="result-card">
+                  <span>{canExpertReview ? "本次命中" : "已命中项"}</span>
+                  <strong>{matchedItems.length}</strong>
+                  <p>完整清单已降为附录，仅在追溯时查看。</p>
+                </article>
+              </div>
+
               <p className="hint review-intro">
-                默认优先显示问题项，其次再看本次命中；完整清单仅在需要追溯时展开查看。
+                {viewDescription}
               </p>
 
               <div className="checklist-toolbar">
@@ -1614,12 +1748,12 @@ function App() {
                 />
                 <div className="archive-stats checklist-stats">
                   <article className="archive-stat">
-                    <span>问题项</span>
-                    <strong>{scopedPendingCount}</strong>
+                    <span>{canExpertReview ? "待复核" : "待处理"}</span>
+                    <strong>{canExpertReview ? expertReviewItems.length : attentionItems.length}</strong>
                   </article>
                   <article className="archive-stat">
-                    <span>本次命中</span>
-                    <strong>{focusItemCount}</strong>
+                    <span>已命中</span>
+                    <strong>{matchedItems.length}</strong>
                   </article>
                   <article className="archive-stat">
                     <span>当前显示</span>
@@ -1629,18 +1763,12 @@ function App() {
               </div>
 
               <div className="filter-row">
-                {[
-                  ["unresolved", "问题项"],
-                  ["focus", "本次命中"],
-                  ["mandatory", "必须项"],
-                  ["all", "完整清单"],
-                  ["blockers", "阻断项"],
-                ].map(([value, label]) => (
+                {reviewTabOptions.map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
-                    className={filter === value ? "filter-pill active" : "filter-pill"}
-                    onClick={() => setFilter(value as typeof filter)}
+                    className={resultView === value ? "filter-pill active" : "filter-pill"}
+                    onClick={() => setResultView(value)}
                   >
                     {label}
                   </button>
@@ -1681,14 +1809,14 @@ function App() {
               ) : (
                 <div className="empty-card">
                   <strong>当前筛选下没有命中条目</strong>
-                  <p>可切换到“问题项”“本次命中”或“完整清单”，也可以调整搜索关键词重新查看。</p>
+                  <p>可切换到“待处理/待复核”“已命中”或“完整附录”，也可以调整搜索关键词重新查看。</p>
                 </div>
               )}
             </>
           ) : (
             <div className="empty-card">
-              <strong>上传并分析后，这里只展示审核结论和问题项</strong>
-              <p>固定审查清单已内置，无需先浏览全部条目。开始分析后，再按问题项、本次命中或完整清单查看结果。</p>
+              <strong>{canExpertReview ? "从左侧选择待复审案件后，这里只展示复核重点" : "上传并分析后，这里只展示当前业务的结论和待处理项"}</strong>
+              <p>{canExpertReview ? "专家无需先浏览完整清单；选择一条待复审业务后，中间区域会直接聚焦待复核项和问题项。" : "固定审查清单已内置，无需先浏览全部条目。开始分析后，再按待处理项、已命中项或完整附录查看结果。"}</p>
             </div>
           )}
         </section>
@@ -1822,31 +1950,47 @@ function App() {
               <p className="section-kicker">Evidence</p>
               <h3>抽取结果</h3>
             </div>
-            <span className="soft-badge">{analysis.evidences.length} files</span>
+            <div className="mechanism-actions">
+              <span className="soft-badge">{analysis.evidences.length} files</span>
+              <button
+                className="ghost-button compact"
+                type="button"
+                onClick={() => setShowEvidencePanel((current) => !current)}
+              >
+                {showEvidencePanel ? "收起抽取文本" : "查看抽取文本"}
+              </button>
+            </div>
           </div>
 
-          <div className="evidence-grid">
-            {analysis.evidences.map((evidence) => (
-              <article className="evidence-card" key={evidence.id}>
-                <div className="evidence-card-head">
-                  <strong>{evidence.fileName}</strong>
-                  <span>{evidence.source}</span>
-                </div>
-                <p>{evidence.summary}</p>
-                <div className="detail-meta">
-                  <span>{evidence.namingHint}</span>
-                  <span>
-                    {evidence.globalEvidence
-                      ? "全局材料"
-                      : evidence.linkedCodes.length > 0
-                        ? `命中 ${evidence.linkedCodes.join(", ")}`
-                        : "未自动归档"}
-                  </span>
-                </div>
-                <pre>{evidence.extractedText.slice(0, 500) || "未提取到有效文本。"}</pre>
-              </article>
-            ))}
-          </div>
+          {showEvidencePanel ? (
+            <div className="evidence-grid">
+              {analysis.evidences.map((evidence) => (
+                <article className="evidence-card" key={evidence.id}>
+                  <div className="evidence-card-head">
+                    <strong>{evidence.fileName}</strong>
+                    <span>{evidence.source}</span>
+                  </div>
+                  <p>{evidence.summary}</p>
+                  <div className="detail-meta">
+                    <span>{evidence.namingHint}</span>
+                    <span>
+                      {evidence.globalEvidence
+                        ? "全局材料"
+                        : evidence.linkedCodes.length > 0
+                          ? `命中 ${evidence.linkedCodes.join(", ")}`
+                          : "未自动归档"}
+                    </span>
+                  </div>
+                  <pre>{evidence.extractedText.slice(0, 500) || "未提取到有效文本。"}</pre>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-card">
+              <strong>抽取文本已默认收起</strong>
+              <p>日常审核优先看业务结论、问题项和待复核项；只有在需要追溯 OCR / 文档抽取内容时再展开查看。</p>
+            </div>
+          )}
         </section>
       ) : null}
     </main>
