@@ -238,15 +238,6 @@ function buildBatchRecommendation(files: File[]) {
   };
 }
 
-function isRecentCase(updatedAt: string) {
-  const timestamp = new Date(updatedAt).getTime();
-  if (Number.isNaN(timestamp)) {
-    return false;
-  }
-
-  return Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
-}
-
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -464,8 +455,10 @@ function App() {
     return true;
   });
 
-  const selectedChecklist = checklistItems.find((item) => item.code === selectedCode);
-  const selectedResult = resultMap.get(selectedCode) ?? mergedItems[0];
+  const selectedChecklist = analysis
+    ? checklistItems.find((item) => item.code === selectedCode)
+    : undefined;
+  const selectedResult = analysis ? resultMap.get(selectedCode) ?? mergedItems[0] : undefined;
 
   const statBlockers = mergedItems.filter(
     (item, index) =>
@@ -508,8 +501,12 @@ function App() {
 
     return searchTarget.includes(archiveKeyword);
   });
-  const recentCases = filteredCaseHistory.filter((entry) => isRecentCase(entry.updatedAt));
-  const earlierCases = filteredCaseHistory.filter((entry) => !isRecentCase(entry.updatedAt));
+  const inProgressCases = filteredCaseHistory.filter(
+    (entry) => entry.workflow.status !== "expert_reviewed",
+  );
+  const reviewedCases = filteredCaseHistory.filter(
+    (entry) => entry.workflow.status === "expert_reviewed",
+  );
   const archiveSummary = {
     total: caseHistory.length,
     pending: caseHistory.filter((entry) => entry.workflow.status === "pending_expert_review")
@@ -518,18 +515,18 @@ function App() {
   };
   const archiveViewSummary = {
     visible: filteredCaseHistory.length,
-    recent: recentCases.length,
-    earlier: earlierCases.length,
+    inProgress: inProgressCases.length,
+    reviewed: reviewedCases.length,
   };
 
   useEffect(() => {
     if (analysis?.caseId) {
-      setFilter("focus");
+      setFilter(scopedPendingCount > 0 ? "unresolved" : "focus");
       setChecklistQuery("");
     } else {
       setFilter("all");
     }
-  }, [analysis?.caseId]);
+  }, [analysis?.caseId, scopedPendingCount]);
 
   useEffect(() => {
     if (!filteredItems.some((item) => item.code === selectedCode) && filteredItems[0]?.code) {
@@ -1335,7 +1332,7 @@ function App() {
             </div>
             <p className="archive-meta">
               已加载 {archiveSummary.total} 条案件，当前命中 {archiveViewSummary.visible} 条。
-              最近 7 天 {archiveViewSummary.recent} 条，更早 {archiveViewSummary.earlier} 条。
+              审核中 {archiveViewSummary.inProgress} 条，已审核 {archiveViewSummary.reviewed} 条。
             </p>
             <div className="filter-row archive-filter-row">
               {Object.entries(caseArchiveFilterLabel).map(([value, label]) => (
@@ -1357,14 +1354,14 @@ function App() {
               <p>正在加载已保存案件...</p>
             ) : filteredCaseHistory.length > 0 ? (
               <>
-                {recentCases.length > 0 ? (
+                {inProgressCases.length > 0 ? (
                   <div className="case-group">
                     <div className="case-group-head">
-                      <span>最近 7 天</span>
-                      <strong>{recentCases.length}</strong>
+                      <span>审核中项目</span>
+                      <strong>{inProgressCases.length}</strong>
                     </div>
                     <div className="case-history">
-                      {recentCases.map((entry) => (
+                      {inProgressCases.map((entry) => (
                         <button
                           type="button"
                           key={entry.caseId}
@@ -1392,14 +1389,14 @@ function App() {
                     </div>
                   </div>
                 ) : null}
-                {earlierCases.length > 0 ? (
+                {reviewedCases.length > 0 ? (
                   <div className="case-group">
                     <div className="case-group-head">
-                      <span>更早案件</span>
-                      <strong>{earlierCases.length}</strong>
+                      <span>已审核项目</span>
+                      <strong>{reviewedCases.length}</strong>
                     </div>
                     <div className="case-history">
-                      {earlierCases.map((entry) => (
+                      {reviewedCases.map((entry) => (
                         <button
                           type="button"
                           key={entry.caseId}
@@ -1488,94 +1485,103 @@ function App() {
         <section className="review-list panel">
           <div className="panel-head">
             <div>
-              <p className="section-kicker">Checklist</p>
-              <h3>逐条审查</h3>
+              <p className="section-kicker">Review Result</p>
+              <h3>审核结果</h3>
             </div>
             <span className="soft-badge">
-              {filteredItems.length} / {checklistItems.length}
+              {analysis ? `${filteredItems.length} / ${checklistItems.length}` : "等待分析"}
             </span>
           </div>
-          <p className="hint review-intro">
-            默认聚焦本次有证据或已产出结论的条目；切换“全部”可查看完整清单。
-          </p>
+          {analysis ? (
+            <>
+              <p className="hint review-intro">
+                默认优先显示问题项，其次再看本次命中；完整清单仅在需要追溯时展开查看。
+              </p>
 
-          <div className="checklist-toolbar">
-            <input
-              className="archive-search"
-              value={checklistQuery}
-              placeholder="搜索审查项编号、要求或分类"
-              onChange={(event) => setChecklistQuery(event.target.value)}
-            />
-            <div className="archive-stats checklist-stats">
-              <article className="archive-stat">
-                <span>本次命中</span>
-                <strong>{focusItemCount}</strong>
-              </article>
-              <article className="archive-stat">
-                <span>待处理</span>
-                <strong>{scopedPendingCount}</strong>
-              </article>
-              <article className="archive-stat">
-                <span>当前显示</span>
-                <strong>{filteredItems.length}</strong>
-              </article>
-            </div>
-          </div>
+              <div className="checklist-toolbar">
+                <input
+                  className="archive-search"
+                  value={checklistQuery}
+                  placeholder="搜索审查项编号、要求或分类"
+                  onChange={(event) => setChecklistQuery(event.target.value)}
+                />
+                <div className="archive-stats checklist-stats">
+                  <article className="archive-stat">
+                    <span>问题项</span>
+                    <strong>{scopedPendingCount}</strong>
+                  </article>
+                  <article className="archive-stat">
+                    <span>本次命中</span>
+                    <strong>{focusItemCount}</strong>
+                  </article>
+                  <article className="archive-stat">
+                    <span>当前显示</span>
+                    <strong>{filteredItems.length}</strong>
+                  </article>
+                </div>
+              </div>
 
-          <div className="filter-row">
-            {[
-              ["focus", "本次命中"],
-              ["all", "全部"],
-              ["mandatory", "必须项"],
-              ["blockers", "阻断项"],
-              ["unresolved", "待处理"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={filter === value ? "filter-pill active" : "filter-pill"}
-                onClick={() => setFilter(value as typeof filter)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {filteredItems.length > 0 ? (
-            <div className="items">
-              {filteredItems.map((item) => {
-                const result = resultMap.get(item.code);
-                const tone = statusTone[result?.status ?? "pending"];
-                return (
+              <div className="filter-row">
+                {[
+                  ["unresolved", "问题项"],
+                  ["focus", "本次命中"],
+                  ["mandatory", "必须项"],
+                  ["all", "完整清单"],
+                  ["blockers", "阻断项"],
+                ].map(([value, label]) => (
                   <button
+                    key={value}
                     type="button"
-                    key={item.code}
-                    className={selectedCode === item.code ? "item-row active" : "item-row"}
-                    onClick={() => setSelectedCode(item.code)}
+                    className={filter === value ? "filter-pill active" : "filter-pill"}
+                    onClick={() => setFilter(value as typeof filter)}
                   >
-                    <div className="item-topline">
-                      <span className="item-code">{item.code}</span>
-                      {item.mandatory ? <span className="must-tag">必须</span> : null}
-                      {hasEvidenceMatch(item.code) ? (
-                        <span className="soft-badge">已命中材料</span>
-                      ) : null}
-                      <span className={`status-tag ${tone}`}>
-                        {statusLabel[result?.status ?? "pending"]}
-                      </span>
-                    </div>
-                    <p>{item.requirement}</p>
-                    <div className="item-meta">
-                      <span>{item.category}</span>
-                      <span>置信度 {result?.confidence ?? 0}</span>
-                    </div>
+                    {label}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+
+              {filteredItems.length > 0 ? (
+                <div className="items">
+                  {filteredItems.map((item) => {
+                    const result = resultMap.get(item.code);
+                    const tone = statusTone[result?.status ?? "pending"];
+                    return (
+                      <button
+                        type="button"
+                        key={item.code}
+                        className={selectedCode === item.code ? "item-row active" : "item-row"}
+                        onClick={() => setSelectedCode(item.code)}
+                      >
+                        <div className="item-topline">
+                          <span className="item-code">{item.code}</span>
+                          {item.mandatory ? <span className="must-tag">必须</span> : null}
+                          {hasEvidenceMatch(item.code) ? (
+                            <span className="soft-badge">已命中材料</span>
+                          ) : null}
+                          <span className={`status-tag ${tone}`}>
+                            {statusLabel[result?.status ?? "pending"]}
+                          </span>
+                        </div>
+                        <p>{item.requirement}</p>
+                        <div className="item-meta">
+                          <span>{item.category}</span>
+                          <span>置信度 {result?.confidence ?? 0}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-card">
+                  <strong>当前筛选下没有命中条目</strong>
+                  <p>可切换到“问题项”“本次命中”或“完整清单”，也可以调整搜索关键词重新查看。</p>
+                </div>
+              )}
+            </>
           ) : (
             <div className="empty-card">
-              <strong>当前筛选下没有命中条目</strong>
-              <p>可切换到“本次命中”或“全部”，也可以调整搜索关键词重新查看。</p>
+              <strong>上传并分析后，这里只展示审核结论和问题项</strong>
+              <p>固定审查清单已内置，无需先浏览全部条目。开始分析后，再按问题项、本次命中或完整清单查看结果。</p>
             </div>
           )}
         </section>
