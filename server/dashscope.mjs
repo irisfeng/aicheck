@@ -215,9 +215,8 @@ export async function analyzeSecurityScanReport({
     return null;
   }
 
-  const summaryModel = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
   const visionModel = process.env.DASHSCOPE_VISION_MODEL ?? "qwen3-vl-plus";
-  const model = reportImageFiles.length > 0 ? visionModel : summaryModel;
+  const model = visionModel;
   const selectedImages = reportImageFiles.slice(0, 4);
 
   const prompt = `
@@ -226,6 +225,7 @@ export async function analyzeSecurityScanReport({
 请不要绑定某一家厂商模板，但可以参考正规云厂商和安全厂商报告的共性做法。判断口径要通用、保守、不过度苛刻：
 1. 是否能识别出受检设备/资产清单，至少能看出扫描对象或设备列表
 2. 是否能识别出每台设备的漏洞概况，或至少存在按设备/资产区分的漏洞结果
+2a. 如果正文中已经明确写出“设备名/IP + 高危/中危/低危数量或漏洞结果”，即使不是标准表格，也应认定为已具备逐设备结果
 3. 如果报告明确显示仍存在未处理的中危、高危或严重漏洞，则判为 fail
 4. 如果报告明确说明没有中高危未处理漏洞，且资产清单、按设备结果都较完整，可判为 pass
 5. 如果报告只有总览，没有设备清单或看不出每台设备漏洞情况，则优先判为 insufficient_evidence
