@@ -43,14 +43,64 @@ function usingPostgres() {
   return Boolean(getDatabaseUrl());
 }
 
+function getSslMode(databaseUrl) {
+  const explicitMode = String(process.env.PGSSLMODE || "").trim().toLowerCase();
+  if (explicitMode) {
+    return explicitMode;
+  }
+
+  if (!databaseUrl) {
+    return "";
+  }
+
+  try {
+    return new URL(databaseUrl).searchParams.get("sslmode")?.toLowerCase() || "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeDatabaseUrl(databaseUrl) {
+  if (!databaseUrl) return "";
+
+  try {
+    const url = new URL(databaseUrl);
+    const sslMode = getSslMode(databaseUrl);
+
+    if (sslMode === "disable") {
+      url.searchParams.set("sslmode", "disable");
+      return url.toString();
+    }
+
+    // Keep the current secure behavior explicit and avoid pg's future-semantics warning.
+    url.searchParams.set("sslmode", "verify-full");
+    return url.toString();
+  } catch {
+    return databaseUrl;
+  }
+}
+
+function getSslConfig(databaseUrl) {
+  const sslMode = getSslMode(databaseUrl);
+
+  if (sslMode === "disable") {
+    return false;
+  }
+
+  if (String(process.env.PGSSL_INSECURE || "").trim().toLowerCase() === "true") {
+    return { rejectUnauthorized: false };
+  }
+
+  return true;
+}
+
 function getPool() {
   if (!pool) {
+    const databaseUrl = getDatabaseUrl();
+
     pool = new Pool({
-      connectionString: getDatabaseUrl(),
-      ssl:
-        process.env.PGSSLMODE === "disable"
-          ? false
-          : { rejectUnauthorized: false },
+      connectionString: normalizeDatabaseUrl(databaseUrl),
+      ssl: getSslConfig(databaseUrl),
     });
   }
 
