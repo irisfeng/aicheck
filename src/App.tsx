@@ -50,9 +50,9 @@ const workflowTone: Record<ReviewWorkflowStatus, string> = {
 };
 
 const recommendedBatch = {
-  checklistItems: 8,
-  images: 10,
-  totalFiles: 12,
+  checklistItems: 6,
+  images: 8,
+  totalFiles: 8,
 };
 
 const caseArchiveFilterLabel = {
@@ -164,9 +164,9 @@ async function readApiPayload(response: Response) {
   }
 
   if (response.status === 504 || compact.includes("Task timed out after 300 seconds")) {
-    return {
-      error:
-        "分析超时：当前批次材料较多。建议先按 6 到 8 个审查项分批提交，优先上传关键截图；其余材料可在下一批继续分析。",
+      return {
+        error:
+        "分析超时：当前批次材料较多。建议每次先传 5 到 8 个文件，文件较多时分批提交，优先上传关键截图。",
     };
   }
 
@@ -1195,10 +1195,10 @@ function App() {
           </label>
           <div className="uploader-note field-wide">
             <ul className="upload-rules">
-              <li>单次最多 20 个文件，单个文件不超过 15MB，不支持 ZIP。</li>
+              <li>建议每次先传 5 到 8 个文件，文件较多时分批上传。</li>
               <li>文件名建议以审查项编号开头，如 <code>2.8.1.1-1.png</code>。</li>
+              <li>单个文件不超过 15MB，不支持 ZIP。</li>
               <li>关键证据优先传独立图片，Word / PDF 作为补充材料。</li>
-              <li>建议每批控制在 6 到 8 个审查项或 8 到 10 张图片。</li>
             </ul>
           </div>
         </div>
@@ -1218,7 +1218,7 @@ function App() {
           <p className="batch-warning">
             当前批次共 {batchRecommendation.totalFiles} 个文件，其中图片{" "}
             {batchRecommendation.imageCount} 张，覆盖约 {batchRecommendation.distinctCodes || "多"} 个审查项。
-            为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批控制在 6 到 8 个审查项或 8 到 10 张图片。
+            为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批先控制在 5 到 8 个文件。
           </p>
         ) : null}
 
