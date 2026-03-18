@@ -56,6 +56,28 @@ const severityRank = {
   fail: 3,
 };
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  const concurrency = Math.max(1, Math.min(limit, items.length || 1));
+  let index = 0;
+
+  async function worker() {
+    while (true) {
+      const currentIndex = index;
+      index += 1;
+
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return results;
+}
+
 function sanitizeWorkflowUser(user) {
   if (!user) return undefined;
 
@@ -146,8 +168,10 @@ async function runMandatoryVisionRechecks({
   notes,
 }) {
   const results = {};
+  const concurrency = Number(process.env.DASHSCOPE_MANDATORY_VISION_CONCURRENCY || 2);
+  const mandatoryItems = checklist.filter((entry) => entry.mandatory);
 
-  for (const item of checklist.filter((entry) => entry.mandatory)) {
+  await mapWithConcurrency(mandatoryItems, concurrency, async (item) => {
     const directEvidence = evidenceIndex.directByCode[item.code] ?? [];
     const imageFiles = directEvidence
       .filter((evidence) => evidence.mimeType.startsWith("image/"))
@@ -155,7 +179,7 @@ async function runMandatoryVisionRechecks({
       .filter(Boolean);
 
     if (imageFiles.length === 0) {
-      continue;
+      return;
     }
 
     const ocrSnippets = directEvidence.map((evidence) => ({
@@ -178,7 +202,7 @@ async function runMandatoryVisionRechecks({
     } catch (error) {
       console.error(`Vision recheck failed for ${item.code}:`, error);
     }
-  }
+  });
 
   return results;
 }
@@ -575,10 +599,15 @@ export function createApiRouter() {
         return res.status(400).json({ error: "请至少上传一个文件。" });
       }
 
-      const evidences = [];
       const fileMap = new Map();
+      const imageCount = files.filter((file) => file.mimetype.startsWith("image/")).length;
+      const inlineVisionLimit = Number(process.env.DASHSCOPE_INLINE_VISION_MAX_FILES || 6);
+      const enableInlineVision =
+        process.env.DASHSCOPE_ENABLE_VISION_ENRICHMENT === "true" &&
+        imageCount <= Math.max(1, inlineVisionLimit);
+      const evidenceConcurrency = Number(process.env.ANALYZE_FILE_CONCURRENCY || 3);
 
-      for (const file of files) {
+      const evidences = await mapWithConcurrency(files, evidenceConcurrency, async (file) => {
         const routing = inferEvidenceRouting(file.originalname, checklistCodes);
         const evidenceId = `${file.originalname}-${file.size}-${Date.now()}-${Math.random()
           .toString(36)
@@ -594,25 +623,26 @@ export function createApiRouter() {
         fileMap.set(evidenceId, file);
 
         if (file.mimetype.startsWith("image/")) {
-          const extractedText = await ocrImage(file);
-          const visionSummary = await enrichImage(file);
-          evidences.push({
+          const [extractedText, visionSummary] = await Promise.all([
+            ocrImage(file),
+            enableInlineVision ? enrichImage(file) : Promise.resolve(""),
+          ]);
+          return {
             ...base,
             source: "ocr",
             extractedText,
             summary: visionSummary || "已通过百炼 OCR 提取图片文字。",
-          });
-          continue;
+          };
         }
 
         const documentResult = await extractDocumentText(file);
-        evidences.push({
+        return {
           ...base,
           source: documentResult.source,
           extractedText: documentResult.text,
           summary: documentResult.summary,
-        });
-      }
+        };
+      });
 
       const evidenceIndex = buildEvidenceIndex(checklist, evidences);
       const visionAssessments = await runMandatoryVisionRechecks({

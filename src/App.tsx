@@ -123,6 +123,32 @@ function computeSummary(items: ReviewItemResult[], overview: string) {
   };
 }
 
+async function readApiPayload(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  const compact = text.trim();
+
+  if (!compact) {
+    return {};
+  }
+
+  if (response.status === 504 || compact.includes("Task timed out after 300 seconds")) {
+    return {
+      error:
+        "分析超时：当前批次材料较多。建议先按 6 到 8 个审查项分批提交，优先上传关键截图；其余材料可在下一批继续分析。",
+    };
+  }
+
+  return {
+    error: compact.slice(0, 240),
+  };
+}
+
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -362,7 +388,7 @@ function App() {
       }),
     });
 
-    const payload = await response.json();
+    const payload = await readApiPayload(response);
     if (!response.ok) {
       const message = String(payload?.error || "");
       if (message.includes("R2")) {
@@ -446,7 +472,7 @@ function App() {
         }),
       });
 
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "保存人工复核结果失败。");
       }
@@ -477,7 +503,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
         },
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "读取案件详情失败。");
       }
@@ -508,7 +534,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
         },
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "提交专家复审失败。");
       }
@@ -539,7 +565,7 @@ function App() {
           Authorization: `Bearer ${authToken}`,
         },
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "标记专家终审完成失败。");
       }
@@ -571,7 +597,7 @@ function App() {
         body: JSON.stringify(loginForm),
       });
 
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "登录失败，请检查账号信息。");
       }
@@ -651,7 +677,7 @@ function App() {
         });
       }
 
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok) {
         throw new Error(payload.error ?? "分析失败，请稍后重试。");
       }
@@ -958,6 +984,11 @@ function App() {
               命名，系统会优先按文件名前缀自动归档。
             </span>
           </label>
+          <p className="uploader-note field-wide">
+            支持图片、PDF、DOCX、TXT、MD、JSON；单次最多 20 个文件，单个不超过 15MB，不支持 ZIP。建议按
+            <code>2.8.1.1说明.png</code>、<code>2.8.1.1-1.png</code>、<code>安扫报告.pdf</code>
+            命名；系统按编号前缀自动归档，关键证据优先传独立图片，Word/PDF 作为补充。
+          </p>
         </div>
 
         {files.length > 0 ? (
