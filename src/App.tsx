@@ -293,6 +293,21 @@ function App() {
 
   const canExpertReview = authUser?.role === "expert";
   const currentWorkflow = normalizeWorkflow(analysis?.workflow);
+  const loadedBusinessName = String(
+    analysis?.businessName ?? analysis?.caseName ?? "",
+  ).trim();
+  const shouldContinueCurrentCase = Boolean(
+    analysis?.caseId &&
+      trimmedBusinessName &&
+      loadedBusinessName &&
+      loadedBusinessName === trimmedBusinessName,
+  );
+  const activeCaseIdForSubmit = shouldContinueCurrentCase ? analysis?.caseId : undefined;
+  const willCreateNewCase =
+    Boolean(analysis?.caseId) &&
+    Boolean(trimmedBusinessName) &&
+    Boolean(loadedBusinessName) &&
+    loadedBusinessName !== trimmedBusinessName;
   const operatorCanSubmitToExpert =
     authUser?.role === "operator" &&
     Boolean(analysis?.caseId) &&
@@ -620,7 +635,19 @@ function App() {
     }
   }
 
-  async function uploadFilesToObjectStorage(): Promise<UploadedObject[] | null> {
+  function startNewCase() {
+    setAnalysis(null);
+    setManualOverrides({});
+    setBusinessName("");
+    setNotes("");
+    setFiles([]);
+    setError("");
+    if (checklistItems[0]?.code) {
+      setSelectedCode(checklistItems[0].code);
+    }
+  }
+
+  async function uploadFilesToObjectStorage(caseId?: string): Promise<UploadedObject[] | null> {
     if (files.length === 0) {
       return [];
     }
@@ -632,7 +659,7 @@ function App() {
         Authorization: `Bearer ${authToken}`,
       },
       body: JSON.stringify({
-        caseId: analysis?.caseId || "draft",
+        caseId: caseId || "draft",
         files: files.map((file) => ({
           fileName: file.name,
           mimeType: file.type || "application/octet-stream",
@@ -921,7 +948,7 @@ function App() {
 
     try {
       let response;
-      const uploadedFiles = await uploadFilesToObjectStorage();
+      const uploadedFiles = await uploadFilesToObjectStorage(activeCaseIdForSubmit);
 
       if (uploadedFiles) {
         response = await fetch("/api/analyze", {
@@ -933,7 +960,7 @@ function App() {
           body: JSON.stringify({
             businessName: trimmedBusinessName,
             notes,
-            caseId: analysis?.caseId,
+            caseId: activeCaseIdForSubmit,
             uploadedFiles,
           }),
         });
@@ -941,8 +968,8 @@ function App() {
         const formData = new FormData();
         formData.append("businessName", trimmedBusinessName);
         formData.append("notes", notes);
-        if (analysis?.caseId) {
-          formData.append("caseId", analysis.caseId);
+        if (activeCaseIdForSubmit) {
+          formData.append("caseId", activeCaseIdForSubmit);
         }
         files.forEach((file) => formData.append("files", file));
 
@@ -1414,8 +1441,13 @@ function App() {
                   : currentWorkflow.status === "pending_expert_review"
                     ? "已进入专家复审队列"
                     : isSubmittingToExpert
-                      ? "提交中..."
+                    ? "提交中..."
                       : "提交专家复审"}
+              </button>
+            ) : null}
+            {analysis?.caseId ? (
+              <button className="ghost-button" type="button" onClick={startNewCase}>
+                新建案件
               </button>
             ) : null}
             <p className="hint">
@@ -1452,6 +1484,11 @@ function App() {
 
           {!trimmedBusinessName ? (
             <p className="hint sync-note">请先填写业务名称，再发起上传分析。</p>
+          ) : null}
+          {willCreateNewCase ? (
+            <p className="hint sync-note">
+              当前已从业务“{loadedBusinessName}”切换到“{trimmedBusinessName}”，下一次分析会自动新建案件，不会覆盖原案件。
+            </p>
           ) : null}
 
           {error ? <p className="error-banner">{error}</p> : null}

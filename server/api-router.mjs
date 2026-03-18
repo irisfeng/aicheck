@@ -646,6 +646,19 @@ export function createApiRouter() {
       if (!businessName) {
         return res.status(400).json({ error: "请先填写业务名称后再上传分析。" });
       }
+      const requestedCaseId = String(req.body.caseId || "").trim();
+      let caseIdForSave = requestedCaseId || undefined;
+      if (requestedCaseId) {
+        const existingCase = await getReviewCase(requestedCaseId, req.auth.user);
+        const existingBusinessName = resolveBusinessName(
+          existingCase?.businessName,
+          existingCase?.caseName,
+        );
+
+        if (!existingCase || (existingBusinessName && existingBusinessName !== businessName)) {
+          caseIdForSave = undefined;
+        }
+      }
       const notes = String(req.body.notes || "");
       const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
       const files = await collectRequestFiles(req);
@@ -769,7 +782,7 @@ export function createApiRouter() {
       };
 
       const persistence = await saveReviewCase({
-        caseId: String(req.body.caseId || "").trim() || undefined,
+        caseId: caseIdForSave,
         caseName: businessName,
         notes,
         provider: getProviderLabel(),
