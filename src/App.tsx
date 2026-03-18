@@ -264,6 +264,43 @@ function buildBatchRecommendation(files: File[]) {
   };
 }
 
+function summarizeSelectedFiles(files: File[], uploadedFiles: UploadedObject[] = []) {
+  const existingByName = new Map(uploadedFiles.map((file) => [file.fileName, file]));
+  const seenSelection = new Set<string>();
+  const effectiveFiles: File[] = [];
+  const duplicateExisting: File[] = [];
+  const duplicateSelection: File[] = [];
+  const replacements: File[] = [];
+
+  for (const file of files) {
+    const selectionKey = `${file.name}::${file.size}::${file.lastModified}`;
+    if (seenSelection.has(selectionKey)) {
+      duplicateSelection.push(file);
+      continue;
+    }
+    seenSelection.add(selectionKey);
+
+    const existing = existingByName.get(file.name);
+    if (existing) {
+      if (existing.size === file.size) {
+        duplicateExisting.push(file);
+        continue;
+      }
+
+      replacements.push(file);
+    }
+
+    effectiveFiles.push(file);
+  }
+
+  return {
+    effectiveFiles,
+    duplicateExisting,
+    duplicateSelection,
+    replacements,
+  };
+}
+
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -278,6 +315,7 @@ function App() {
   const [businessName, setBusinessName] = useState("");
   const [notes, setNotes] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [fileSelectionMessage, setFileSelectionMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingReview, setIsSavingReview] = useState(false);
   const [isSubmittingToExpert, setIsSubmittingToExpert] = useState(false);
@@ -679,6 +717,7 @@ function App() {
     setBusinessName("");
     setNotes("");
     setFiles([]);
+    setFileSelectionMessage("");
     setError("");
     if (authUser) {
       window.localStorage.removeItem(activeCaseStorageKey);
@@ -836,6 +875,7 @@ function App() {
       setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? "");
       setFiles([]);
+      setFileSelectionMessage("");
       if (authUser) {
         window.localStorage.setItem(activeCaseStorageKey, nextAnalysis.caseId);
       }
@@ -1017,6 +1057,15 @@ function App() {
       return;
     }
 
+    if (files.length === 0) {
+      setError(
+        analysis?.caseId
+          ? "鏈鏈€夋嫨鏂扮殑鏈夋晥鏉愭枡銆傚悓鍚嶄笖鍚屽ぇ灏忕殑閲嶅鏂囦欢浼氳鑷姩璺宠繃銆?"
+          : "璇峰厛閫夋嫨瑕佷笂浼犵殑鏉愭枡鍚庡啀鍒嗘瀽銆?",
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -1066,6 +1115,7 @@ function App() {
       setBusinessName(nextAnalysis.businessName ?? nextAnalysis.caseName ?? "");
       setNotes(nextAnalysis.notes ?? notes);
       setFiles([]);
+      setFileSelectionMessage("");
       if (nextAnalysis.items?.[0]?.code) {
         setSelectedCode(nextAnalysis.items[0].code);
       }
@@ -1081,7 +1131,32 @@ function App() {
 
   function updateFiles(nextFiles: FileList | null) {
     if (!nextFiles) return;
-    setFiles(Array.from(nextFiles));
+    const selectedFiles = Array.from(nextFiles);
+    const summary = summarizeSelectedFiles(selectedFiles, analysis?.uploadedFiles ?? []);
+    const messages = [];
+
+    if (summary.duplicateExisting.length > 0) {
+      messages.push(
+        `已跳过 ${summary.duplicateExisting.length} 个与当前案件同名且同大小的重复文件，不再重复分析。`,
+      );
+    }
+
+    if (summary.duplicateSelection.length > 0) {
+      messages.push(`已去除本次选择中的 ${summary.duplicateSelection.length} 个重复文件。`);
+    }
+
+    if (summary.replacements.length > 0) {
+      messages.push(
+        `${summary.replacements.length} 个同名但大小变化的文件将视为更新版本，并替换旧材料。`,
+      );
+    }
+
+    if (summary.effectiveFiles.length === 0) {
+      messages.push("本次未检测到新的有效文件，可直接继续查看当前案件结果。");
+    }
+
+    setFiles(summary.effectiveFiles);
+    setFileSelectionMessage(messages.join(" "));
   }
 
   async function applyOverride(status: ReviewStatus) {
@@ -1405,6 +1480,7 @@ function App() {
             </p>
           </div>
 
+          {fileSelectionMessage ? <p className="selection-message">{fileSelectionMessage}</p> : null}
           {analysis?.caseId ? (
             <p className="hint sync-note">
               当前案件：{analysis.businessName} · {analysis.caseId} · 最后更新于{" "}
@@ -1502,7 +1578,7 @@ function App() {
               className="primary-button"
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting || !trimmedBusinessName}
+              disabled={isSubmitting || !trimmedBusinessName || files.length === 0}
             >
               {isSubmitting ? "分析中..." : "开始分析"}
             </button>

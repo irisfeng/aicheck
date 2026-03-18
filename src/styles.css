@@ -459,6 +459,16 @@ button {
   gap: 0.3rem;
 }
 
+.selection-message {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(164, 107, 22, 0.1);
+  color: var(--warn);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
 .batch-warning {
   margin: 14px 0 0;
   padding: 12px 14px;

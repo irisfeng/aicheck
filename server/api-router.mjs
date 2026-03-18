@@ -380,6 +380,14 @@ function mergeUploadedFileRefs(existingFiles = [], incomingFiles = []) {
 
   for (const file of incomingFiles.map(normalizeUploadedFileRef)) {
     if (!file.fileName) continue;
+    const existing = merged.get(file.fileName);
+    if (
+      existing &&
+      existing.size === file.size &&
+      existing.mimeType === file.mimeType
+    ) {
+      continue;
+    }
     merged.set(file.fileName, file);
   }
 
@@ -723,11 +731,22 @@ export function createApiRouter() {
             ? existingCase.uploadedFiles.map(normalizeUploadedFileRef)
             : []
           : [];
+      const previousUploadedFileByName = new Map(
+        previousUploadedFiles.map((file) => [file.fileName, file]),
+      );
+      const effectiveCurrentBatchFiles = currentBatchFiles.filter((file) => {
+        const previousFile = previousUploadedFileByName.get(file.originalname);
+        return !(
+          previousFile &&
+          previousFile.size === file.size &&
+          previousFile.mimeType === file.mimetype
+        );
+      });
       const uploadedFiles = mergeUploadedFileRefs(previousUploadedFiles, incomingUploadedFiles);
       const currentBatchFileNames = new Set(
-        currentBatchFiles.map((file) => file.originalname),
+        effectiveCurrentBatchFiles.map((file) => file.originalname),
       );
-      const files = currentBatchFiles;
+      const files = effectiveCurrentBatchFiles;
 
       if (!Array.isArray(files) || files.length === 0) {
         return res.status(400).json({ error: "请至少上传一个文件。" });
