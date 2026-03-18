@@ -63,6 +63,12 @@ const caseArchiveFilterLabel = {
   draft: "草稿",
 } as const;
 
+const sampleCaseNames = new Set([
+  "语音业务接入审核案件",
+  "工作流自动送审验收",
+  "未命名业务",
+]);
+
 function normalizeWorkflow(workflow?: ReviewWorkflow): ReviewWorkflow {
   return {
     status: workflow?.status ?? "draft",
@@ -105,6 +111,11 @@ function formatDateTime(value?: string) {
 function shortCaseId(value?: string) {
   if (!value) return "--";
   return value.slice(0, 8);
+}
+
+function isSampleCaseName(name?: string) {
+  const normalized = String(name || "").trim();
+  return sampleCaseNames.has(normalized);
 }
 
 function isAttentionStatus(status?: ReviewStatus) {
@@ -247,6 +258,7 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(Boolean(authToken));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
 
   const [businessName, setBusinessName] = useState("");
@@ -277,6 +289,7 @@ function App() {
   const [caseHistoryQuery, setCaseHistoryQuery] = useState("");
   const [caseHistoryFilter, setCaseHistoryFilter] =
     useState<keyof typeof caseArchiveFilterLabel>("all");
+  const [showSampleCases, setShowSampleCases] = useState(false);
   const batchRecommendation = buildBatchRecommendation(files);
   const trimmedBusinessName = businessName.trim();
 
@@ -478,7 +491,14 @@ function App() {
     return isAttentionStatus(result?.status) || (hasEvidenceMatch(item.code) && result?.status === "pending");
   }).length;
   const archiveKeyword = caseHistoryQuery.trim().toLowerCase();
+  const hiddenSampleCaseCount = caseHistory.filter((entry) =>
+    isSampleCaseName(entry.businessName ?? entry.caseName),
+  ).length;
   const filteredCaseHistory = caseHistory.filter((entry) => {
+    if (!showSampleCases && isSampleCaseName(entry.businessName ?? entry.caseName)) {
+      return false;
+    }
+
     const workflowMatches =
       caseHistoryFilter === "all" || entry.workflow.status === caseHistoryFilter;
     if (!workflowMatches) {
@@ -1006,16 +1026,40 @@ function App() {
 
             <label className="field">
               <span>密码</span>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(event) =>
-                  setLoginForm((current) => ({
-                    ...current,
-                    password: event.target.value,
-                  }))
-                }
-              />
+              <div className="password-field">
+                <input
+                  type={showLoginPassword ? "text" : "password"}
+                  value={loginForm.password}
+                  onChange={(event) =>
+                    setLoginForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  aria-label={showLoginPassword ? "隐藏密码" : "显示密码"}
+                  onClick={() => setShowLoginPassword((current) => !current)}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="18"
+                    height="18"
+                    aria-hidden="true"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+                    {showLoginPassword ? null : <path d="M4 20 20 4" />}
+                  </svg>
+                </button>
+              </div>
             </label>
           </div>
 
@@ -1336,6 +1380,20 @@ function App() {
               已加载 {archiveSummary.total} 条案件，当前命中 {archiveViewSummary.visible} 条。
               审核中 {archiveViewSummary.inProgress} 条，已审核 {archiveViewSummary.reviewed} 条。
             </p>
+            {hiddenSampleCaseCount > 0 ? (
+              <div className="archive-toggle-row">
+                <p className="hint">
+                  默认已隐藏 {hiddenSampleCaseCount} 条测试/验收案件，避免干扰业务历史列表。
+                </p>
+                <button
+                  className="ghost-button compact"
+                  type="button"
+                  onClick={() => setShowSampleCases((current) => !current)}
+                >
+                  {showSampleCases ? "隐藏测试案件" : `显示测试案件（${hiddenSampleCaseCount}）`}
+                </button>
+              </div>
+            ) : null}
             <div className="filter-row archive-filter-row">
               {Object.entries(caseArchiveFilterLabel).map(([value, label]) => (
                 <button
