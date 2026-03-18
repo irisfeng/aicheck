@@ -66,6 +66,31 @@ export type ReviewItemResult = {
   nextAction: string;
 };
 
+export type SecurityScanDevice = {
+  assetName: string;
+  assetIdentifier: string;
+  highRiskCount: number | null;
+  mediumRiskCount: number | null;
+  lowRiskCount: number | null;
+  status: "pass" | "fail" | "unknown";
+};
+
+export type SecurityScanAssessment = {
+  status: ReviewStatus;
+  confidence: number;
+  qualified: boolean;
+  hasDeviceInventory: boolean;
+  hasPerDeviceDetails: boolean;
+  totalDevices: number | null;
+  mediumHighOpenCount: number | null;
+  summary: string;
+  basis: string[];
+  remediation: string;
+  referenceMethod: string;
+  evidenceFiles: string[];
+  devices: SecurityScanDevice[];
+};
+
 export type AnalysisResponse = {
   caseId: string;
   createdAt?: string;
@@ -85,6 +110,7 @@ export type AnalysisResponse = {
     totalMandatoryCount: number;
     overview: string;
   };
+  scanReport?: SecurityScanAssessment;
   evidences: AnalysisEvidence[];
   items: ReviewItemResult[];
 };

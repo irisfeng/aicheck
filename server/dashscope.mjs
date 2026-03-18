@@ -34,6 +34,19 @@ function parseJsonResponse(text) {
   return JSON.parse(cleaned);
 }
 
+function safeInteger(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const matched = value.match(/-?\d+/);
+    if (matched) {
+      return Number.parseInt(matched[0], 10);
+    }
+  }
+  return null;
+}
+
 async function chatCompletion({ model, messages, temperature = 0.2, maxTokens = 4096 }) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -192,12 +205,167 @@ ${JSON.stringify(ocrSnippets.slice(0, 3), null, 2)}
   return parseJsonResponse(text);
 }
 
+export async function analyzeSecurityScanReport({
+  businessName,
+  notes,
+  reportEvidences,
+  reportImageFiles = [],
+}) {
+  if (!Array.isArray(reportEvidences) || reportEvidences.length === 0) {
+    return null;
+  }
+
+  const summaryModel = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
+  const visionModel = process.env.DASHSCOPE_VISION_MODEL ?? "qwen3-vl-plus";
+  const model = reportImageFiles.length > 0 ? visionModel : summaryModel;
+  const selectedImages = reportImageFiles.slice(0, 4);
+
+  const prompt = `
+你是网络安全审核助手，现在要对“安扫/漏洞扫描报告”做通用型合格性判断。
+
+请不要绑定某一家厂商模板，但可以参考正规云厂商和安全厂商报告的共性做法。判断口径要通用、保守、不过度苛刻：
+1. 是否能识别出受检设备/资产清单，至少能看出扫描对象或设备列表
+2. 是否能识别出每台设备的漏洞概况，或至少存在按设备/资产区分的漏洞结果
+3. 如果报告明确显示仍存在未处理的中危、高危或严重漏洞，则判为 fail
+4. 如果报告明确说明没有中高危未处理漏洞，且资产清单、按设备结果都较完整，可判为 pass
+5. 如果报告只有总览，没有设备清单或看不出每台设备漏洞情况，则优先判为 insufficient_evidence
+6. 只能依据材料中可见内容判断，禁止脑补
+7. 输出必须为严格 JSON
+
+案件名称：${businessName}
+审核备注：${notes || "无"}
+
+报告材料摘要：
+${JSON.stringify(
+    reportEvidences.map((evidence) => ({
+      fileName: evidence.fileName,
+      summary: evidence.summary,
+      extractedText: evidence.extractedText.slice(0, 5000),
+    })),
+    null,
+    2,
+  )}
+
+返回格式：
+{
+  "status": "pass",
+  "confidence": 86,
+  "qualified": true,
+  "hasDeviceInventory": true,
+  "hasPerDeviceDetails": true,
+  "totalDevices": 6,
+  "mediumHighOpenCount": 0,
+  "summary": "一句话总结安扫报告是否合格",
+  "basis": ["依据1", "依据2"],
+  "remediation": "若不合格或证据不足，给出整改项",
+  "referenceMethod": "补充报告或截图参考方式",
+  "evidenceFiles": ["安扫报告.pdf"],
+  "devices": [
+    {
+      "assetName": "语音网关01",
+      "assetIdentifier": "10.0.0.8",
+      "highRiskCount": 0,
+      "mediumRiskCount": 0,
+      "lowRiskCount": 2,
+      "status": "pass"
+    }
+  ]
+}
+`;
+
+  const userContent =
+    selectedImages.length > 0
+      ? [
+          { type: "text", text: prompt },
+          ...selectedImages.map((file) => ({
+            type: "image_url",
+            image_url: { url: dataUrlFromFile(file) },
+          })),
+        ]
+      : prompt;
+
+  const { text } = await chatCompletion({
+    model,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You assess vulnerability scan reports conservatively and return strict JSON only.",
+      },
+      {
+        role: "user",
+        content: userContent,
+      },
+    ],
+    temperature: 0.1,
+    maxTokens: 3200,
+  });
+
+  const parsed = parseJsonResponse(text);
+  const normalizedDevices = Array.isArray(parsed.devices)
+    ? parsed.devices.slice(0, 12).map((device) => ({
+        assetName: String(device?.assetName || "").trim() || "未命名设备",
+        assetIdentifier: String(device?.assetIdentifier || "").trim(),
+        highRiskCount: safeInteger(device?.highRiskCount),
+        mediumRiskCount: safeInteger(device?.mediumRiskCount),
+        lowRiskCount: safeInteger(device?.lowRiskCount),
+        status:
+          device?.status === "pass" || device?.status === "fail"
+            ? device.status
+            : "unknown",
+      }))
+    : [];
+
+  const normalizedStatus =
+    parsed.status === "pass" ||
+    parsed.status === "fail" ||
+    parsed.status === "insufficient_evidence" ||
+    parsed.status === "manual_review_required"
+      ? parsed.status
+      : "insufficient_evidence";
+  const mediumHighOpenCount = safeInteger(parsed.mediumHighOpenCount);
+  const hasDeviceInventory = Boolean(parsed.hasDeviceInventory);
+  const hasPerDeviceDetails = Boolean(parsed.hasPerDeviceDetails);
+  const qualified = Boolean(parsed.qualified);
+  const finalStatus =
+    mediumHighOpenCount !== null && mediumHighOpenCount > 0
+      ? "fail"
+      : !hasDeviceInventory || !hasPerDeviceDetails
+        ? normalizedStatus === "pass"
+          ? "insufficient_evidence"
+          : normalizedStatus
+        : qualified && normalizedStatus === "pass"
+          ? "pass"
+          : normalizedStatus;
+
+  return {
+    status: finalStatus,
+    confidence: safeInteger(parsed.confidence) ?? 0,
+    qualified: finalStatus === "pass",
+    hasDeviceInventory,
+    hasPerDeviceDetails,
+    totalDevices: safeInteger(parsed.totalDevices),
+    mediumHighOpenCount,
+    summary: String(parsed.summary || "").trim() || "未能形成稳定的安扫报告结论。",
+    basis: Array.isArray(parsed.basis) ? parsed.basis.filter(Boolean).map(String) : [],
+    remediation: String(parsed.remediation || "").trim() || "请补充完整安扫报告或确认漏洞处置情况。",
+    referenceMethod:
+      String(parsed.referenceMethod || "").trim() ||
+      "建议补充包含设备清单、每台设备漏洞概况和风险等级汇总的安扫报告。",
+    evidenceFiles: Array.isArray(parsed.evidenceFiles)
+      ? parsed.evidenceFiles.filter(Boolean).map(String)
+      : reportEvidences.map((evidence) => evidence.fileName),
+    devices: normalizedDevices,
+  };
+}
+
 export async function reviewChecklist({
   caseName,
   notes,
   checklist,
   evidenceIndex,
   visionAssessments = {},
+  scanReportAssessment = null,
 }) {
   const model = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
   const mandatoryCount = checklist.filter((item) => item.mandatory).length;
@@ -221,6 +389,10 @@ export async function reviewChecklist({
       requirement: item.requirement,
       directEvidence,
       visionRecheck: visionAssessments[item.code] ?? null,
+      scanReportAssessment:
+        /漏洞扫描|安扫|扫描报告/u.test(item.requirement) && scanReportAssessment
+          ? scanReportAssessment
+          : null,
     };
   });
 
@@ -232,6 +404,7 @@ export async function reviewChecklist({
 2. 对必须项必须保守：证据不充分时优先 insufficient_evidence 或 manual_review_required
 3. 不要捏造证据，不要引用不存在的文件
 4. 如果某个必须项携带 visionRecheck，请优先参考视觉复判结果；当 OCR 与视觉冲突时，按更保守的结论输出
+5. 如果某个条目携带 scanReportAssessment，请把它当作安扫专项证据来综合判断
 5. confidence 为 0-100 的整数
 6. evidenceFiles 只写文件名数组
 7. basis 为简洁数组，写出判断依据、缺失证据点或冲突点

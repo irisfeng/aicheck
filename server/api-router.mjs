@@ -4,6 +4,7 @@ import { login, logout, requireAuth } from "./auth.mjs";
 import { loadChecklist } from "./checklist.mjs";
 import { extractDocumentText } from "./document-extractor.mjs";
 import {
+  analyzeSecurityScanReport,
   enrichImage,
   getProviderLabel,
   isApiConfigured,
@@ -260,11 +261,35 @@ function buildFallbackItem(item, directFiles) {
   };
 }
 
+function isSecurityScanChecklistItem(item) {
+  return /漏洞扫描|安扫|扫描报告/u.test(item.requirement);
+}
+
+function buildScanReportReviewItem(item, scanReportAssessment) {
+  return {
+    code: item.code,
+    status: scanReportAssessment.status,
+    confidence: scanReportAssessment.confidence,
+    rationale: `安扫专项结论：${scanReportAssessment.summary}`,
+    basis:
+      scanReportAssessment.basis.length > 0
+        ? scanReportAssessment.basis
+        : ["已识别安扫报告，但未提取到足够稳定的结构化依据。"],
+    remediation: scanReportAssessment.remediation,
+    referenceMethod: scanReportAssessment.referenceMethod,
+    evidenceFiles: scanReportAssessment.evidenceFiles,
+    nextAction: scanReportAssessment.qualified
+      ? "保留最新安扫报告，进入后续人工终审。"
+      : "请补充完整安扫材料或先完成中高危漏洞处置后再提交。",
+  };
+}
+
 function normalizeReviewItems({
   checklist,
   evidenceIndex,
   reviewResult,
   visionAssessments,
+  scanReportAssessment,
 }) {
   return checklist.map((item) => {
     const modelItem = reviewResult.items?.find((entry) => entry.code === item.code);
@@ -291,7 +316,13 @@ function normalizeReviewItems({
         }
       : buildFallbackItem(item, directFiles);
 
-    return pickConservativeResult(baseItem, visionItem, item.mandatory);
+    const withVision = pickConservativeResult(baseItem, visionItem, item.mandatory);
+    const scanReportItem =
+      scanReportAssessment && isSecurityScanChecklistItem(item)
+        ? buildScanReportReviewItem(item, scanReportAssessment)
+        : null;
+
+    return pickConservativeResult(withVision, scanReportItem, item.mandatory);
   });
 }
 
@@ -669,12 +700,26 @@ export function createApiRouter() {
       });
 
       const evidenceIndex = buildEvidenceIndex(checklist, evidences);
+      const scanReportEvidences = evidenceIndex.globalEvidences;
       const visionAssessments = await runMandatoryVisionRechecks({
         checklist,
         evidenceIndex,
         fileMap,
         notes,
       });
+      const scanReportImageFiles = scanReportEvidences
+        .filter((evidence) => evidence.mimeType.startsWith("image/"))
+        .map((evidence) => fileMap.get(evidence.id))
+        .filter(Boolean);
+      const scanReportAssessment =
+        scanReportEvidences.length > 0
+          ? await analyzeSecurityScanReport({
+              businessName,
+              notes,
+              reportEvidences: scanReportEvidences,
+              reportImageFiles: scanReportImageFiles,
+            })
+          : null;
 
       const reviewResult = await reviewChecklist({
         caseName: businessName,
@@ -682,6 +727,7 @@ export function createApiRouter() {
         checklist,
         evidenceIndex,
         visionAssessments,
+        scanReportAssessment,
       });
 
       const normalizedItems = normalizeReviewItems({
@@ -689,6 +735,7 @@ export function createApiRouter() {
         evidenceIndex,
         reviewResult,
         visionAssessments,
+        scanReportAssessment,
       });
       const mandatoryItems = checklist.filter((item) => item.mandatory);
       const summary = {
@@ -715,6 +762,7 @@ export function createApiRouter() {
             ? createPendingExpertWorkflow(req.auth.user)
             : normalizeWorkflow(undefined),
         uploadedFiles,
+        scanReport: scanReportAssessment,
         evidences,
         summary,
         items: normalizedItems,

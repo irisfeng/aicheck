@@ -10,6 +10,7 @@ import type {
   ReviewStatus,
   ReviewWorkflow,
   ReviewWorkflowStatus,
+  SecurityScanAssessment,
   UploadedObject,
 } from "./types";
 
@@ -518,6 +519,7 @@ function App() {
     inProgress: inProgressCases.length,
     reviewed: reviewedCases.length,
   };
+  const scanReport = analysis?.scanReport as SecurityScanAssessment | undefined;
 
   useEffect(() => {
     if (analysis?.caseId) {
@@ -1480,6 +1482,54 @@ function App() {
               </p>
             </div>
           )}
+
+          {analysis ? (
+            <div className="summary-card">
+              <p className="section-kicker">Security Scan</p>
+              <h4>{scanReport ? scanReport.summary : "未识别安扫报告"}</h4>
+              {scanReport ? (
+                <>
+                  <div className="detail-meta">
+                    <span className={`status-tag ${statusTone[scanReport.status]}`}>
+                      {statusLabel[scanReport.status]}
+                    </span>
+                    <span>{scanReport.qualified ? "安扫结论：合格" : "安扫结论：待处理"}</span>
+                  </div>
+                  <div className="scan-report-grid">
+                    <article className="archive-stat">
+                      <span>设备清单</span>
+                      <strong>{scanReport.hasDeviceInventory ? "有" : "不足"}</strong>
+                    </article>
+                    <article className="archive-stat">
+                      <span>逐设备漏洞</span>
+                      <strong>{scanReport.hasPerDeviceDetails ? "有" : "不足"}</strong>
+                    </article>
+                    <article className="archive-stat">
+                      <span>中高危未处置</span>
+                      <strong>{scanReport.mediumHighOpenCount ?? "--"}</strong>
+                    </article>
+                  </div>
+                  {scanReport.devices.length > 0 ? (
+                    <ul className="scan-device-list">
+                      {scanReport.devices.slice(0, 5).map((device, index) => (
+                        <li key={`${device.assetName}-${device.assetIdentifier}-${index}`}>
+                          <strong>{device.assetName}</strong>
+                          <span>
+                            {device.assetIdentifier || "未标明资产标识"} · 高危{" "}
+                            {device.highRiskCount ?? "--"} / 中危 {device.mediumRiskCount ?? "--"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <p>
+                  当前未识别到命名为安扫报告/扫描报告的全局材料。若本次审核需要漏洞扫描结论，建议补传正式安扫报告。
+                </p>
+              )}
+            </div>
+          ) : null}
         </aside>
 
         <section className="review-list panel">
