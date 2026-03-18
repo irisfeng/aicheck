@@ -394,6 +394,13 @@ button {
   margin: 0 0.18rem;
 }
 
+.upload-rules {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
 .batch-warning {
   margin: 14px 0 0;
   padding: 12px 14px;
@@ -544,6 +551,61 @@ button {
   margin-top: 18px;
 }
 
+.archive-toolbar {
+  margin: 12px 0 10px;
+}
+
+.archive-search {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+}
+
+.archive-search:focus {
+  outline: none;
+  border-color: rgba(14, 109, 97, 0.35);
+  box-shadow: 0 0 0 4px rgba(14, 109, 97, 0.08);
+}
+
+.archive-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.archive-stat {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.archive-stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin-bottom: 4px;
+}
+
+.archive-stat strong {
+  font-size: 1.05rem;
+}
+
+.archive-filter-row {
+  margin-bottom: 14px;
+}
+
+.archive-meta {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .summary-card h4,
 .detail-card h4 {
   margin: 2px 0 10px;
@@ -553,6 +615,19 @@ button {
 .case-history {
   display: grid;
   gap: 10px;
+}
+
+.case-group + .case-group {
+  margin-top: 14px;
+}
+
+.case-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .case-link {

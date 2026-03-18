@@ -228,7 +228,7 @@ export async function listReviewCases(user) {
             SELECT *
             FROM review_cases
             ORDER BY updated_at DESC
-            LIMIT 50
+            LIMIT 200
           `,
           values: [],
         }
@@ -238,7 +238,7 @@ export async function listReviewCases(user) {
             FROM review_cases
             WHERE created_by_username = $1
             ORDER BY updated_at DESC
-            LIMIT 50
+            LIMIT 200
           `,
           values: [user.username],
         };

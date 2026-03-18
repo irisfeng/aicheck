@@ -55,6 +55,13 @@ const recommendedBatch = {
   totalFiles: 12,
 };
 
+const caseArchiveFilterLabel = {
+  all: "全部",
+  pending_expert_review: "待专家",
+  expert_reviewed: "已终审",
+  draft: "草稿",
+} as const;
+
 function normalizeWorkflow(workflow?: ReviewWorkflow): ReviewWorkflow {
   return {
     status: workflow?.status ?? "draft",
@@ -92,6 +99,11 @@ function formatDateTime(value?: string) {
   } catch {
     return value;
   }
+}
+
+function shortCaseId(value?: string) {
+  if (!value) return "--";
+  return value.slice(0, 8);
 }
 
 function computeSummary(items: ReviewItemResult[], overview: string) {
@@ -218,6 +230,15 @@ function buildBatchRecommendation(files: File[]) {
   };
 }
 
+function isRecentCase(updatedAt: string) {
+  const timestamp = new Date(updatedAt).getTime();
+  if (Number.isNaN(timestamp)) {
+    return false;
+  }
+
+  return Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
+}
+
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -251,6 +272,9 @@ function App() {
   const [caseHistory, setCaseHistory] = useState<CaseSummary[]>([]);
   const [casesLoading, setCasesLoading] = useState(false);
   const [casesError, setCasesError] = useState("");
+  const [caseHistoryQuery, setCaseHistoryQuery] = useState("");
+  const [caseHistoryFilter, setCaseHistoryFilter] =
+    useState<keyof typeof caseArchiveFilterLabel>("all");
   const batchRecommendation = buildBatchRecommendation(files);
   const trimmedBusinessName = businessName.trim();
 
@@ -419,6 +443,44 @@ function App() {
       item.status === "manual_review_required" ||
       item.status === "insufficient_evidence",
   ).length;
+  const archiveKeyword = caseHistoryQuery.trim().toLowerCase();
+  const filteredCaseHistory = caseHistory.filter((entry) => {
+    const workflowMatches =
+      caseHistoryFilter === "all" || entry.workflow.status === caseHistoryFilter;
+    if (!workflowMatches) {
+      return false;
+    }
+
+    if (!archiveKeyword) {
+      return true;
+    }
+
+    const searchTarget = [
+      entry.businessName,
+      entry.caseName,
+      entry.caseId,
+      entry.createdBy.displayName,
+      entry.createdBy.username,
+      entry.recommendedDecision,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return searchTarget.includes(archiveKeyword);
+  });
+  const recentCases = filteredCaseHistory.filter((entry) => isRecentCase(entry.updatedAt));
+  const earlierCases = filteredCaseHistory.filter((entry) => !isRecentCase(entry.updatedAt));
+  const archiveSummary = {
+    total: caseHistory.length,
+    pending: caseHistory.filter((entry) => entry.workflow.status === "pending_expert_review")
+      .length,
+    reviewed: caseHistory.filter((entry) => entry.workflow.status === "expert_reviewed").length,
+  };
+  const archiveViewSummary = {
+    visible: filteredCaseHistory.length,
+    recent: recentCases.length,
+    earlier: earlierCases.length,
+  };
 
   async function refreshCases() {
     if (!authToken || !authUser) return;
@@ -1063,18 +1125,17 @@ function App() {
             />
             <strong>拖拽或点击上传材料</strong>
             <span>
-              支持图片、PDF、DOCX、TXT、MD、JSON。建议按
-              <code>2.8.1.1.png</code>、
-              <code>2.8.1.1-1.png</code>、
-              <code>安扫报告.pdf</code>
-              命名，系统会优先按文件名前缀自动归档。
+              支持图片、PDF、DOCX、TXT、MD、JSON，系统会优先按审查项编号前缀自动归档。
             </span>
           </label>
-          <p className="uploader-note field-wide">
-            支持图片、PDF、DOCX、TXT、MD、JSON；单次最多 20 个文件，单个不超过 15MB，不支持 ZIP。建议按
-            <code>2.8.1.1说明.png</code>、<code>2.8.1.1-1.png</code>、<code>安扫报告.pdf</code>
-            命名；系统按编号前缀自动归档，关键证据优先传独立图片，Word/PDF 作为补充。
-          </p>
+          <div className="uploader-note field-wide">
+            <ul className="upload-rules">
+              <li>单次最多 20 个文件，单个文件不超过 15MB，不支持 ZIP。</li>
+              <li>文件名建议以审查项编号开头，如 <code>2.8.1.1-1.png</code>。</li>
+              <li>关键证据优先传独立图片，Word / PDF 作为补充材料。</li>
+              <li>建议每批控制在 6 到 8 个审查项或 8 到 10 张图片。</li>
+            </ul>
+          </div>
         </div>
 
         {files.length > 0 ? (
@@ -1199,41 +1260,130 @@ function App() {
           </div>
 
           <div className="summary-card">
-            <p className="section-kicker">Recent Cases</p>
+            <p className="section-kicker">Case Archive</p>
+            <div className="archive-toolbar">
+              <input
+                className="archive-search"
+                value={caseHistoryQuery}
+                placeholder="搜索业务名称、提交人、结论或案件 ID"
+                onChange={(event) => setCaseHistoryQuery(event.target.value)}
+              />
+            </div>
+            <div className="archive-stats">
+              <article className="archive-stat">
+                <span>全部</span>
+                <strong>{archiveSummary.total}</strong>
+              </article>
+              <article className="archive-stat">
+                <span>待专家</span>
+                <strong>{archiveSummary.pending}</strong>
+              </article>
+              <article className="archive-stat">
+                <span>已终审</span>
+                <strong>{archiveSummary.reviewed}</strong>
+              </article>
+            </div>
+            <p className="archive-meta">
+              已加载 {archiveSummary.total} 条案件，当前命中 {archiveViewSummary.visible} 条。
+              最近 7 天 {archiveViewSummary.recent} 条，更早 {archiveViewSummary.earlier} 条。
+            </p>
+            <div className="filter-row archive-filter-row">
+              {Object.entries(caseArchiveFilterLabel).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    caseHistoryFilter === value ? "filter-pill active" : "filter-pill"
+                  }
+                  onClick={() =>
+                    setCaseHistoryFilter(value as keyof typeof caseArchiveFilterLabel)
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {casesLoading ? (
               <p>正在加载已保存案件...</p>
-            ) : caseHistory.length > 0 ? (
-              <div className="case-history">
-                {caseHistory.map((entry) => (
-                  <button
-                    type="button"
-                    key={entry.caseId}
-                    className={
-                      analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
-                    }
-                    onClick={() => loadCase(entry.caseId)}
-                  >
-                    <div className="case-link-top">
-                      <strong>{entry.businessName ?? entry.caseName}</strong>
-                      <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
-                        {workflowLabel[entry.workflow.status]}
-                      </span>
+            ) : filteredCaseHistory.length > 0 ? (
+              <>
+                {recentCases.length > 0 ? (
+                  <div className="case-group">
+                    <div className="case-group-head">
+                      <span>最近 7 天</span>
+                      <strong>{recentCases.length}</strong>
                     </div>
-                    <div className="item-meta">
-                      <span>{entry.createdBy.displayName}</span>
-                      <span>{formatDateTime(entry.updatedAt)}</span>
+                    <div className="case-history">
+                      {recentCases.map((entry) => (
+                        <button
+                          type="button"
+                          key={entry.caseId}
+                          className={
+                            analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
+                          }
+                          onClick={() => loadCase(entry.caseId)}
+                        >
+                          <div className="case-link-top">
+                            <strong>{entry.businessName ?? entry.caseName}</strong>
+                            <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                              {workflowLabel[entry.workflow.status]}
+                            </span>
+                          </div>
+                          <div className="item-meta">
+                            <span>{entry.createdBy.displayName}</span>
+                            <span>{formatDateTime(entry.updatedAt)}</span>
+                          </div>
+                          <div className="item-meta">
+                            <span>{entry.recommendedDecision}</span>
+                            <span>ID {shortCaseId(entry.caseId)}</span>
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                    <div className="item-meta">
-                      <span>{entry.recommendedDecision}</span>
-                      {entry.workflow.submittedToExpertAt ? (
-                        <span>送审 {formatDateTime(entry.workflow.submittedToExpertAt)}</span>
-                      ) : null}
+                  </div>
+                ) : null}
+                {earlierCases.length > 0 ? (
+                  <div className="case-group">
+                    <div className="case-group-head">
+                      <span>更早案件</span>
+                      <strong>{earlierCases.length}</strong>
                     </div>
-                  </button>
-                ))}
-              </div>
+                    <div className="case-history">
+                      {earlierCases.map((entry) => (
+                        <button
+                          type="button"
+                          key={entry.caseId}
+                          className={
+                            analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
+                          }
+                          onClick={() => loadCase(entry.caseId)}
+                        >
+                          <div className="case-link-top">
+                            <strong>{entry.businessName ?? entry.caseName}</strong>
+                            <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                              {workflowLabel[entry.workflow.status]}
+                            </span>
+                          </div>
+                          <div className="item-meta">
+                            <span>{entry.createdBy.displayName}</span>
+                            <span>{formatDateTime(entry.updatedAt)}</span>
+                          </div>
+                          <div className="item-meta">
+                            <span>{entry.recommendedDecision}</span>
+                            <span>ID {shortCaseId(entry.caseId)}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : (
-              <p>当前还没有已保存案件，上传并分析一次后会出现在这里。</p>
+              <p>
+                {caseHistory.length > 0
+                  ? "未找到符合当前筛选条件的案件，可尝试调整关键词或状态。"
+                  : "当前还没有已保存案件，上传并分析一次后会出现在这里。"}
+              </p>
             )}
             {casesError ? <p className="hint">{casesError}</p> : null}
           </div>
