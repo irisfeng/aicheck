@@ -386,22 +386,6 @@ function mergeUploadedFileRefs(existingFiles = [], incomingFiles = []) {
   return Array.from(merged.values());
 }
 
-function mergeFilesByName(existingFiles = [], incomingFiles = []) {
-  const merged = new Map();
-
-  for (const file of existingFiles) {
-    if (!file?.originalname) continue;
-    merged.set(file.originalname, file);
-  }
-
-  for (const file of incomingFiles) {
-    if (!file?.originalname) continue;
-    merged.set(file.originalname, file);
-  }
-
-  return Array.from(merged.values());
-}
-
 async function collectRequestFiles(req) {
   const uploadedFiles = Array.isArray(req.body?.uploadedFiles) ? req.body.uploadedFiles : [];
 
@@ -743,15 +727,7 @@ export function createApiRouter() {
       const currentBatchFileNames = new Set(
         currentBatchFiles.map((file) => file.originalname),
       );
-      const previousFilesToRead =
-        isObjectStorageConfigured() && previousUploadedFiles.length > 0
-          ? previousUploadedFiles.filter((file) => !currentBatchFileNames.has(file.fileName))
-          : [];
-      const previousStoredFiles =
-        previousFilesToRead.length > 0
-          ? await readUploadedObjects(previousFilesToRead)
-          : [];
-      const files = mergeFilesByName(previousStoredFiles, currentBatchFiles);
+      const files = currentBatchFiles;
 
       if (!Array.isArray(files) || files.length === 0) {
         return res.status(400).json({ error: "请至少上传一个文件。" });

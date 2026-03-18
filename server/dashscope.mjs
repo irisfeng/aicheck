@@ -47,6 +47,13 @@ function safeInteger(value) {
   return null;
 }
 
+function getEvidenceExcerptLength(totalEvidenceCount) {
+  if (totalEvidenceCount >= 18) return 700;
+  if (totalEvidenceCount >= 12) return 1000;
+  if (totalEvidenceCount >= 8) return 1400;
+  return 2200;
+}
+
 async function chatCompletion({ model, messages, temperature = 0.2, maxTokens = 4096 }) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -218,6 +225,7 @@ export async function analyzeSecurityScanReport({
   const visionModel = process.env.DASHSCOPE_VISION_MODEL ?? "qwen3-vl-plus";
   const model = visionModel;
   const selectedImages = reportImageFiles.slice(0, 4);
+  const reportExcerptLength = reportEvidences.length >= 4 ? 2800 : 5000;
 
   const prompt = `
 你是网络安全审核助手，现在要对“安扫/漏洞扫描报告”做通用型合格性判断。
@@ -240,7 +248,7 @@ ${JSON.stringify(
     reportEvidences.map((evidence) => ({
       fileName: evidence.fileName,
       summary: evidence.summary,
-      extractedText: evidence.extractedText.slice(0, 5000),
+      extractedText: evidence.extractedText.slice(0, reportExcerptLength),
     })),
     null,
     2,
@@ -369,17 +377,24 @@ export async function reviewChecklist({
 }) {
   const model = process.env.DASHSCOPE_SUMMARY_MODEL ?? "qwen-flash";
   const mandatoryCount = checklist.filter((item) => item.mandatory).length;
+  const totalEvidenceCount =
+    evidenceIndex.globalEvidences.length +
+    Object.values(evidenceIndex.directByCode).reduce(
+      (sum, items) => sum + items.length,
+      0,
+    );
+  const excerptLength = getEvidenceExcerptLength(totalEvidenceCount);
   const globalEvidencePayload = evidenceIndex.globalEvidences.map((evidence) => ({
     fileName: evidence.fileName,
     summary: evidence.summary,
-    extractedText: evidence.extractedText.slice(0, 2200),
+    extractedText: evidence.extractedText.slice(0, excerptLength),
   }));
 
   const checklistPayload = checklist.map((item) => {
     const directEvidence = (evidenceIndex.directByCode[item.code] ?? []).map((evidence) => ({
       fileName: evidence.fileName,
       summary: evidence.summary,
-      extractedText: evidence.extractedText.slice(0, 2200),
+      extractedText: evidence.extractedText.slice(0, excerptLength),
     }));
 
     return {
