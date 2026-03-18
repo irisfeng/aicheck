@@ -262,9 +262,7 @@ function App() {
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
 
   const [businessName, setBusinessName] = useState("");
-  const [notes, setNotes] = useState(
-    "优先关注黄底必须项；若证据不足，宁可判为待人工复核。",
-  );
+  const [notes, setNotes] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingReview, setIsSavingReview] = useState(false);
@@ -1223,6 +1221,7 @@ function App() {
             <textarea
               rows={4}
               value={notes}
+              placeholder="优先关注黄底必须项；若证据不足，宁可判为待人工复核。"
               onChange={(event) => setNotes(event.target.value)}
             />
           </label>
