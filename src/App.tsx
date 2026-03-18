@@ -49,6 +49,12 @@ const workflowTone: Record<ReviewWorkflowStatus, string> = {
   expert_reviewed: "pass",
 };
 
+const recommendedBatch = {
+  checklistItems: 8,
+  images: 10,
+  totalFiles: 12,
+};
+
 function normalizeWorkflow(workflow?: ReviewWorkflow): ReviewWorkflow {
   return {
     status: workflow?.status ?? "draft",
@@ -149,6 +155,69 @@ async function readApiPayload(response: Response) {
   };
 }
 
+function hasValidCodeBoundary(remainder: string) {
+  if (!remainder) return true;
+
+  const firstChar = remainder[0];
+  return firstChar !== "." && !/\d/u.test(firstChar);
+}
+
+function inferChecklistCodeFromName(fileName: string) {
+  const baseName = fileName.replace(/\.[^.]+$/, "").trim();
+  const sortedCodes = checklistItems
+    .map((item) => item.code)
+    .sort((left, right) => right.length - left.length);
+
+  for (const code of sortedCodes) {
+    if (!baseName.startsWith(code)) {
+      continue;
+    }
+
+    const remainder = baseName.slice(code.length);
+    if (hasValidCodeBoundary(remainder)) {
+      return code;
+    }
+  }
+
+  return "";
+}
+
+function buildBatchRecommendation(files: File[]) {
+  if (files.length === 0) return null;
+
+  const imageCount = files.filter((file) => file.type.startsWith("image/")).length;
+  const distinctCodes = new Set(
+    files.map((file) => inferChecklistCodeFromName(file.name)).filter(Boolean),
+  ).size;
+
+  const exceedsRecommended =
+    distinctCodes > recommendedBatch.checklistItems ||
+    imageCount > recommendedBatch.images ||
+    files.length > recommendedBatch.totalFiles;
+
+  if (!exceedsRecommended) {
+    return null;
+  }
+
+  const suggestedBatches = Math.max(
+    2,
+    Math.ceil(
+      Math.max(
+        distinctCodes / recommendedBatch.checklistItems,
+        imageCount / recommendedBatch.images,
+        files.length / recommendedBatch.totalFiles,
+      ),
+    ),
+  );
+
+  return {
+    imageCount,
+    distinctCodes,
+    totalFiles: files.length,
+    suggestedBatches,
+  };
+}
+
 function App() {
   const [authToken, setAuthToken] = useState(
     () => window.localStorage.getItem(sessionStorageKey) ?? "",
@@ -182,6 +251,7 @@ function App() {
   const [caseHistory, setCaseHistory] = useState<CaseSummary[]>([]);
   const [casesLoading, setCasesLoading] = useState(false);
   const [casesError, setCasesError] = useState("");
+  const batchRecommendation = buildBatchRecommendation(files);
 
   const canExpertReview = authUser?.role === "expert";
   const currentWorkflow = normalizeWorkflow(analysis?.workflow);
@@ -1000,6 +1070,14 @@ function App() {
               </article>
             ))}
           </div>
+        ) : null}
+
+        {batchRecommendation ? (
+          <p className="batch-warning">
+            当前批次共 {batchRecommendation.totalFiles} 个文件，其中图片{" "}
+            {batchRecommendation.imageCount} 张，覆盖约 {batchRecommendation.distinctCodes || "多"} 个审查项。
+            为降低超时风险，建议拆成 {batchRecommendation.suggestedBatches} 批提交，每批控制在 6 到 8 个审查项或 8 到 10 张图片。
+          </p>
         ) : null}
 
         <div className="action-row">

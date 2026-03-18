@@ -394,6 +394,17 @@ button {
   margin: 0 0.18rem;
 }
 
+.batch-warning {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(176, 122, 27, 0.22);
+  border-radius: 16px;
+  background: rgba(176, 122, 27, 0.08);
+  color: #8a5a12;
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
 .file-strip {
   display: flex;
   flex-wrap: wrap;
