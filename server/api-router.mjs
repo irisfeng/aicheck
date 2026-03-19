@@ -255,6 +255,87 @@ function buildMandatoryCollection(checklist, items) {
   };
 }
 
+function shouldLockPassingItems(existingCase) {
+  const workflowStatus = normalizeWorkflow(existingCase?.workflow).status;
+  return (
+    Array.isArray(existingCase?.items) &&
+    existingCase.items.length > 0 &&
+    ["pending_expert_review", "expert_reviewed"].includes(workflowStatus)
+  );
+}
+
+function buildIncrementalReviewScope({
+  checklist,
+  previousItems = [],
+  currentBatchEvidences = [],
+}) {
+  const unresolvedCodes = new Set(
+    (previousItems || [])
+      .filter((item) => item?.code && item.status !== "pass")
+      .map((item) => item.code),
+  );
+  const preservedPassCodes = (previousItems || [])
+    .filter((item) => item?.code && item.status === "pass")
+    .map((item) => item.code);
+  const reviewedCodeSet = new Set();
+  const scanRelatedCodes = checklist
+    .filter((item) => isSecurityScanChecklistItem(item))
+    .map((item) => item.code);
+  const hasGlobalEvidence = (currentBatchEvidences || []).some(
+    (evidence) => evidence?.globalEvidence,
+  );
+
+  for (const evidence of currentBatchEvidences || []) {
+    for (const code of evidence?.linkedCodes || []) {
+      if (unresolvedCodes.has(code)) {
+        reviewedCodeSet.add(code);
+      }
+    }
+  }
+
+  if (hasGlobalEvidence) {
+    for (const code of scanRelatedCodes) {
+      if (unresolvedCodes.has(code)) {
+        reviewedCodeSet.add(code);
+      }
+    }
+  }
+
+  return {
+    unresolvedCodes: [...unresolvedCodes],
+    preservedPassCodes,
+    reviewedCodes: [...reviewedCodeSet],
+    reviewChecklist: checklist.filter((item) => reviewedCodeSet.has(item.code)),
+  };
+}
+
+function mergeReviewItems({
+  checklist,
+  previousItems = [],
+  nextItems = [],
+  evidenceIndex,
+}) {
+  const previousItemMap = new Map((previousItems || []).map((item) => [item.code, item]));
+  const nextItemMap = new Map((nextItems || []).map((item) => [item.code, item]));
+
+  return checklist.map((item) => {
+    const nextItem = nextItemMap.get(item.code);
+    if (nextItem) {
+      return nextItem;
+    }
+
+    const previousItem = previousItemMap.get(item.code);
+    if (previousItem) {
+      return previousItem;
+    }
+
+    const directFiles = (evidenceIndex.directByCode[item.code] ?? []).map(
+      (evidence) => evidence.fileName,
+    );
+    return buildFallbackItem(item, directFiles);
+  });
+}
+
 function buildFallbackItem(item, directFiles) {
   const hasDirectFiles = directFiles.length > 0;
   return {
@@ -823,19 +904,38 @@ export function createApiRouter() {
       const combinedEvidences = [...carriedEvidences, ...evidences];
 
       const evidenceIndex = buildEvidenceIndex(checklist, combinedEvidences);
+      const previousItems = Array.isArray(existingCase?.items) ? existingCase.items : [];
+      const lockPassingItems = shouldLockPassingItems(existingCase);
+      const reviewScope = lockPassingItems
+        ? buildIncrementalReviewScope({
+            checklist,
+            previousItems,
+            currentBatchEvidences: evidences,
+          })
+        : {
+            unresolvedCodes: [],
+            preservedPassCodes: [],
+            reviewedCodes: checklist.map((item) => item.code),
+            reviewChecklist: checklist,
+          };
+      const scopedChecklist = reviewScope.reviewChecklist;
       const scanReportEvidences = evidenceIndex.globalEvidences;
-      const visionAssessments = await runMandatoryVisionRechecks({
-        checklist,
-        evidenceIndex,
-        fileMap,
-        notes,
-      });
+      const scopedScanReview = scopedChecklist.some((item) => isSecurityScanChecklistItem(item));
+      const visionAssessments =
+        scopedChecklist.length > 0
+          ? await runMandatoryVisionRechecks({
+              checklist: scopedChecklist,
+              evidenceIndex,
+              fileMap,
+              notes,
+            })
+          : {};
       const scanReportImageFiles = scanReportEvidences
         .filter((evidence) => evidence.mimeType.startsWith("image/"))
         .map((evidence) => fileMap.get(evidence.id))
         .filter(Boolean);
       const scanReportAssessment =
-        scanReportEvidences.length > 0
+        scanReportEvidences.length > 0 && (!lockPassingItems || scopedScanReview)
           ? await analyzeSecurityScanReport({
               businessName,
               notes,
@@ -844,24 +944,52 @@ export function createApiRouter() {
             })
           : null;
 
-      const reviewResult = await reviewChecklist({
-        caseName: businessName,
-        notes,
-        checklist,
-        evidenceIndex,
-        visionAssessments,
-        scanReportAssessment,
-      });
+      const reviewResult =
+        scopedChecklist.length > 0
+          ? await reviewChecklist({
+              caseName: businessName,
+              notes,
+              checklist: scopedChecklist,
+              evidenceIndex,
+              visionAssessments,
+              scanReportAssessment,
+            })
+          : { summary: {}, items: [] };
 
-      const normalizedItems = normalizeReviewItems({
-        checklist,
-        evidenceIndex,
-        reviewResult,
-        visionAssessments,
-        scanReportAssessment,
-      });
+      const nextItems =
+        scopedChecklist.length > 0
+          ? normalizeReviewItems({
+              checklist: scopedChecklist,
+              evidenceIndex,
+              reviewResult,
+              visionAssessments,
+              scanReportAssessment,
+            })
+          : [];
+      const normalizedItems = lockPassingItems
+        ? mergeReviewItems({
+            checklist,
+            previousItems,
+            nextItems,
+            evidenceIndex,
+          })
+        : nextItems;
       const mandatoryItems = checklist.filter((item) => item.mandatory);
       const mandatoryCollection = buildMandatoryCollection(checklist, normalizedItems);
+      const incrementalScopeMessage = lockPassingItems
+        ? reviewScope.reviewedCodes.length > 0
+          ? `本次补件仅重审未达标项：${reviewScope.reviewedCodes.join("、")}；已达标项沿用上一版结论。`
+          : "本次补件未命中新的一轮重审项，已达标项和既有结论均沿用上一版。"
+        : "";
+      const reviewOverview =
+        reviewResult?.summary?.overview ??
+        `已完成 ${normalizedItems.length} 条审查项初判，其中必须项通过 ${
+          normalizedItems.filter(
+            (entry) =>
+              mandatoryItems.some((item) => item.code === entry.code) &&
+              entry.status === "pass",
+          ).length
+        }/${mandatoryItems.length}。`;
       const summary = {
         ...buildRecommendedDecision(normalizedItems, mandatoryItems),
         ...mandatoryCollection,
@@ -882,6 +1010,13 @@ export function createApiRouter() {
           }`,
       };
 
+      summary.overview = `${incrementalScopeMessage}${incrementalScopeMessage ? " " : ""}${reviewOverview}${
+        mandatoryCollection.mandatoryReadyForExpert
+          ? " 必须项材料已齐套，已自动进入专家复审队列。"
+          : ` 必须项材料尚未齐套，暂不自动送专家；仍缺 ${mandatoryCollection.mandatoryMissingCodes.join("、")}。`
+      }`;
+      const preserveWorkflow = lockPassingItems && reviewScope.reviewedCodes.length === 0;
+
       const reviewPayload = {
         provider: getProviderLabel(),
         businessName,
@@ -890,14 +1025,22 @@ export function createApiRouter() {
         actor: req.auth.user,
         workflow:
           req.auth.user.role === "operator"
-            ? mandatoryCollection.mandatoryReadyForExpert
-              ? createPendingExpertWorkflow(req.auth.user)
-              : normalizeWorkflow(undefined)
-            : normalizeWorkflow(undefined),
+            ? preserveWorkflow
+              ? normalizeWorkflow(existingCase?.workflow)
+              : mandatoryCollection.mandatoryReadyForExpert
+                ? createPendingExpertWorkflow(req.auth.user)
+                : normalizeWorkflow(undefined)
+            : normalizeWorkflow(existingCase?.workflow),
         uploadedFiles,
         scanReport: scanReportAssessment,
         evidences: combinedEvidences,
         summary,
+        reviewScope: {
+          mode: lockPassingItems ? "incremental_unresolved" : "full_review",
+          reviewedCodes: reviewScope.reviewedCodes,
+          preservedPassCodes: reviewScope.preservedPassCodes,
+          unresolvedCodes: reviewScope.unresolvedCodes,
+        },
         items: normalizedItems,
       };
 
