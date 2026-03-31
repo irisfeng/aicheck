@@ -823,7 +823,18 @@ export function createApiRouter() {
           previousFile.mimeType === file.mimetype
         );
       });
-      const uploadedFiles = mergeUploadedFileRefs(previousUploadedFiles, incomingUploadedFiles);
+      // Build uploadedFiles from both R2 refs and FormData multipart files so
+      // that file metadata is always persisted even when R2 is not configured.
+      const formDataFileRefs = (req.files || []).map((file) => ({
+        fileName: file.originalname,
+        mimeType: file.mimetype || "application/octet-stream",
+        size: file.size || 0,
+        objectKey: file.objectKey || "",
+      }));
+      const uploadedFiles = mergeUploadedFileRefs(
+        previousUploadedFiles,
+        incomingUploadedFiles.length > 0 ? incomingUploadedFiles : formDataFileRefs,
+      );
       const currentBatchFileNames = new Set(
         effectiveCurrentBatchFiles.map((file) => file.originalname),
       );
@@ -832,6 +843,36 @@ export function createApiRouter() {
       if (!Array.isArray(files) || files.length === 0) {
         return res.status(400).json({ error: "请至少上传一个文件。" });
       }
+
+      // Save an initial draft BEFORE AI analysis so the case and uploaded file
+      // metadata are persisted even if the analysis times out or fails.
+      const earlyDraft = await saveReviewCase({
+        caseId: caseIdForSave,
+        caseName: businessName,
+        notes,
+        provider: getProviderLabel(),
+        actor: req.auth.user,
+        reviewData: {
+          provider: getProviderLabel(),
+          businessName,
+          caseName: businessName,
+          notes,
+          actor: req.auth.user,
+          workflow: normalizeWorkflow(existingCase?.workflow),
+          uploadedFiles,
+          evidences: existingCase?.evidences ?? [],
+          summary: existingCase?.summary ?? {
+            recommendedDecision: "待分析",
+            blockerCount: 0,
+            unresolvedCount: 0,
+            mandatoryPassCount: 0,
+            totalMandatoryCount: 0,
+            overview: "材料已上传，AI 分析进行中……",
+          },
+          items: existingCase?.items ?? [],
+        },
+      });
+      caseIdForSave = earlyDraft.caseId;
 
       const fileMap = new Map();
       const imageCount = files.filter((file) => file.mimetype.startsWith("image/")).length;
