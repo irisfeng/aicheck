@@ -169,10 +169,8 @@ function toCaseSummary(record) {
   };
 }
 
-function hasCaseAccess(record, user) {
-  if (!record) return false;
-  if (user.role === "expert") return true;
-  return record.created_by_username === user.username;
+function hasCaseAccess(record, _user) {
+  return Boolean(record);
 }
 
 function memoryRecordToRow(record) {
@@ -221,27 +219,15 @@ export async function listReviewCases(user) {
 
   await ensurePostgresSchema();
 
-  const query =
-    user.role === "expert"
-      ? {
-          text: `
-            SELECT *
-            FROM review_cases
-            ORDER BY updated_at DESC
-            LIMIT 200
-          `,
-          values: [],
-        }
-      : {
-          text: `
-            SELECT *
-            FROM review_cases
-            WHERE created_by_username = $1
-            ORDER BY updated_at DESC
-            LIMIT 200
-          `,
-          values: [user.username],
-        };
+  const query = {
+    text: `
+      SELECT *
+      FROM review_cases
+      ORDER BY updated_at DESC
+      LIMIT 200
+    `,
+    values: [],
+  };
 
   const result = await getPool().query(query.text, query.values);
   return result.rows.map(toCaseSummary).sort((left, right) => {
