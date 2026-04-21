@@ -1012,3 +1012,46 @@ button {
   gap: 10px;
   margin-bottom: 6px;
 }
+
+.case-link-wrap,
+.resume-card-wrap {
+  position: relative;
+}
+
+.case-link-wrap .case-link,
+.resume-card-wrap .resume-card {
+  padding-right: 32px;
+}
+
+.case-link-delete,
+.resume-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.case-link-wrap:hover .case-link-delete,
+.resume-card-wrap:hover .resume-card-delete,
+.case-link-delete:focus-visible,
+.resume-card-delete:focus-visible {
+  opacity: 1;
+}
+
+.case-link-delete:hover,
+.resume-card-delete:hover {
+  background: rgba(192, 57, 43, 0.1);
+  color: #c0392b;
+  border-color: rgba(192, 57, 43, 0.3);
+}

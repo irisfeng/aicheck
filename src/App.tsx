@@ -898,6 +898,35 @@ function App() {
     }
   }
 
+  async function deleteCase(caseId: string, displayName: string) {
+    const confirmed = window.confirm(
+      `确定要删除「${displayName}」吗？\n已上传的截图与审核记录将一并清除，无法恢复。`,
+    );
+    if (!confirmed) return;
+
+    setError("");
+    try {
+      const response = await fetch(`/api/cases/${caseId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      const payload = await readApiPayload(response);
+      if (!response.ok) {
+        throw new Error(payload.error ?? "删除案件失败。");
+      }
+
+      setCaseHistory((prev) => prev.filter((entry) => entry.caseId !== caseId));
+
+      if (analysis?.caseId === caseId) {
+        startNewCase();
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除案件失败。");
+    }
+  }
+
   useEffect(() => {
     if (analysis?.caseId || casesLoading || caseHistory.length === 0 || !authUser) {
       return;
@@ -1398,27 +1427,39 @@ function App() {
           </div>
           <div className="resume-list">
             {resumeSuggestions.map((entry) => (
-              <button
-                type="button"
-                key={entry.caseId}
-                className="resume-card"
-                onClick={() => loadCase(entry.caseId)}
-              >
-                <div className="resume-card-top">
-                  <strong>{entry.businessName ?? entry.caseName}</strong>
-                  <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
-                    {workflowLabel[entry.workflow.status]}
-                  </span>
-                </div>
-                <div className="item-meta">
-                  <span>更新于 {formatDateTime(entry.updatedAt)}</span>
-                  <span>必须项 {entry.mandatoryPassCount}/{entry.totalMandatoryCount}</span>
-                </div>
-                <div className="item-meta">
-                  <span>{entry.recommendedDecision}</span>
-                  <span>ID {shortCaseId(entry.caseId)}</span>
-                </div>
-              </button>
+              <div className="resume-card-wrap" key={entry.caseId}>
+                <button
+                  type="button"
+                  className="resume-card"
+                  onClick={() => loadCase(entry.caseId)}
+                >
+                  <div className="resume-card-top">
+                    <strong>{entry.businessName ?? entry.caseName}</strong>
+                    <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                      {workflowLabel[entry.workflow.status]}
+                    </span>
+                  </div>
+                  <div className="item-meta">
+                    <span>更新于 {formatDateTime(entry.updatedAt)}</span>
+                    <span>必须项 {entry.mandatoryPassCount}/{entry.totalMandatoryCount}</span>
+                  </div>
+                  <div className="item-meta">
+                    <span>{entry.recommendedDecision}</span>
+                    <span>ID {shortCaseId(entry.caseId)}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="resume-card-delete"
+                  title="删除此草稿"
+                  aria-label={`删除草稿 ${entry.businessName ?? entry.caseName}`}
+                  onClick={() =>
+                    deleteCase(entry.caseId, entry.businessName ?? entry.caseName ?? "")
+                  }
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         </section>
@@ -1799,29 +1840,41 @@ function App() {
                     </div>
                     <div className="case-history">
                       {inProgressCases.map((entry) => (
-                        <button
-                          type="button"
-                          key={entry.caseId}
-                          className={
-                            analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
-                          }
-                          onClick={() => loadCase(entry.caseId)}
-                        >
-                          <div className="case-link-top">
-                            <strong>{entry.businessName ?? entry.caseName}</strong>
-                            <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
-                              {workflowLabel[entry.workflow.status]}
-                            </span>
-                          </div>
-                          <div className="item-meta">
-                            <span>{entry.createdBy.displayName}</span>
-                            <span>{formatDateTime(entry.updatedAt)}</span>
-                          </div>
-                          <div className="item-meta">
-                            <span>{entry.recommendedDecision}</span>
-                            <span>ID {shortCaseId(entry.caseId)}</span>
-                          </div>
-                        </button>
+                        <div className="case-link-wrap" key={entry.caseId}>
+                          <button
+                            type="button"
+                            className={
+                              analysis?.caseId === entry.caseId ? "case-link active" : "case-link"
+                            }
+                            onClick={() => loadCase(entry.caseId)}
+                          >
+                            <div className="case-link-top">
+                              <strong>{entry.businessName ?? entry.caseName}</strong>
+                              <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                                {workflowLabel[entry.workflow.status]}
+                              </span>
+                            </div>
+                            <div className="item-meta">
+                              <span>{entry.createdBy.displayName}</span>
+                              <span>{formatDateTime(entry.updatedAt)}</span>
+                            </div>
+                            <div className="item-meta">
+                              <span>{entry.recommendedDecision}</span>
+                              <span>ID {shortCaseId(entry.caseId)}</span>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className="case-link-delete"
+                            title="删除此草稿"
+                            aria-label={`删除草稿 ${entry.businessName ?? entry.caseName}`}
+                            onClick={() =>
+                              deleteCase(entry.caseId, entry.businessName ?? entry.caseName ?? "")
+                            }
+                          >
+                            ×
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>

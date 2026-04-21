@@ -284,6 +284,26 @@ export async function getReviewCase(caseId, user) {
   };
 }
 
+export async function deleteReviewCase(caseId, user) {
+  if (!caseId) return false;
+
+  if (!usingPostgres()) {
+    const record = memoryStore.get(caseId);
+    if (!record || !hasCaseAccess(memoryRecordToRow(record), user)) {
+      return false;
+    }
+    memoryStore.delete(caseId);
+    return true;
+  }
+
+  await ensurePostgresSchema();
+  const result = await getPool().query(
+    `DELETE FROM review_cases WHERE id = $1`,
+    [caseId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function saveReviewCase({
   caseId,
   caseName,

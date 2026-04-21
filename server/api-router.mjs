@@ -14,6 +14,7 @@ import {
 } from "./dashscope.mjs";
 import { buildEvidenceIndex, inferEvidenceRouting } from "./evidence-routing.mjs";
 import {
+  deleteReviewCase,
   getReviewCase,
   getStorageLabel,
   isDatabaseConfigured,
@@ -624,6 +625,35 @@ export function createApiRouter() {
       console.error(error);
       res.status(500).json({
         error: error instanceof Error ? error.message : "读取案件详情失败。",
+      });
+    }
+  });
+
+  router.delete("/cases/:caseId", requireAuth, async (req, res) => {
+    try {
+      const reviewCase = await getReviewCase(req.params.caseId, req.auth.user);
+      if (!reviewCase) {
+        return res.status(404).json({ error: "未找到该案件，或当前账号无权访问。" });
+      }
+
+      const status = reviewCase.workflow?.status ?? "draft";
+      if (status !== "draft") {
+        return res.status(409).json({
+          error: "仅草稿状态的案件可删除；已提交专家或已终审的案件需保留审计记录。",
+          workflowStatus: status,
+        });
+      }
+
+      const ok = await deleteReviewCase(req.params.caseId, req.auth.user);
+      if (!ok) {
+        return res.status(404).json({ error: "案件已不存在或删除失败。" });
+      }
+
+      res.json({ ok: true, caseId: req.params.caseId });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "删除案件失败。",
       });
     }
   });
