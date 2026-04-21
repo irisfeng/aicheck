@@ -594,6 +594,17 @@ function App() {
   const inProgressCases = filteredCaseHistory.filter(
     (entry) => entry.workflow.status !== "expert_reviewed",
   );
+  const resumeCandidates = caseHistory
+    .filter((entry) => {
+      if (!showSampleCases && isSampleCaseName(entry.businessName ?? entry.caseName)) {
+        return false;
+      }
+      return entry.workflow.status !== "expert_reviewed";
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const resumeSuggestions = resumeCandidates
+    .filter((entry) => entry.caseId !== analysis?.caseId)
+    .slice(0, 3);
   const reviewedCases = filteredCaseHistory.filter(
     (entry) => entry.workflow.status === "expert_reviewed",
   );
@@ -903,9 +914,17 @@ function App() {
     }
 
     if (!canExpertReview) {
-      const mostRecentCase = caseHistory[0];
-      if (mostRecentCase) {
-        loadCase(mostRecentCase.caseId);
+      const inProgressCandidates = caseHistory
+        .filter((entry) => {
+          if (!showSampleCases && isSampleCaseName(entry.businessName ?? entry.caseName)) {
+            return false;
+          }
+          return entry.workflow.status !== "expert_reviewed";
+        })
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      const nextCase = inProgressCandidates[0];
+      if (nextCase) {
+        loadCase(nextCase.caseId);
       }
       return;
     }
@@ -1365,6 +1384,45 @@ function App() {
           </div>
         </div>
       </section>
+
+      {!canExpertReview && resumeSuggestions.length > 0 ? (
+        <section className="resume-banner panel">
+          <div className="resume-banner-head">
+            <div>
+              <p className="section-kicker">Resume</p>
+              <h3>继续未完成的审核（{resumeCandidates.length}）</h3>
+              <p className="hero-text">
+                换设备登录也能看到你未提交的草稿与待专家的案件，点击任一项接着上传或审核。
+              </p>
+            </div>
+          </div>
+          <div className="resume-list">
+            {resumeSuggestions.map((entry) => (
+              <button
+                type="button"
+                key={entry.caseId}
+                className="resume-card"
+                onClick={() => loadCase(entry.caseId)}
+              >
+                <div className="resume-card-top">
+                  <strong>{entry.businessName ?? entry.caseName}</strong>
+                  <span className={`status-tag ${workflowTone[entry.workflow.status]}`}>
+                    {workflowLabel[entry.workflow.status]}
+                  </span>
+                </div>
+                <div className="item-meta">
+                  <span>更新于 {formatDateTime(entry.updatedAt)}</span>
+                  <span>必须项 {entry.mandatoryPassCount}/{entry.totalMandatoryCount}</span>
+                </div>
+                <div className="item-meta">
+                  <span>{entry.recommendedDecision}</span>
+                  <span>ID {shortCaseId(entry.caseId)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="mechanism panel">
         <div className="panel-head mechanism-head">

@@ -964,3 +964,51 @@ button {
     flex-direction: column;
   }
 }
+
+.resume-banner {
+  padding: 20px 22px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(14, 109, 97, 0.22);
+  background:
+    linear-gradient(135deg, rgba(14, 109, 97, 0.08), transparent 55%),
+    rgba(255, 255, 255, 0.86);
+}
+
+.resume-banner-head {
+  margin-bottom: 14px;
+}
+
+.resume-banner-head h3 {
+  margin: 4px 0 6px;
+}
+
+.resume-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.resume-card {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.resume-card:hover {
+  border-color: rgba(14, 109, 97, 0.35);
+  transform: translateY(-1px);
+}
+
+.resume-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
