@@ -213,7 +213,7 @@ export async function listReviewCases(user) {
         const rankDiff =
           workflowRank(left.workflow.status) - workflowRank(right.workflow.status);
         if (rankDiff !== 0) return rankDiff;
-        return right.updatedAt.localeCompare(left.updatedAt);
+        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
       });
   }
 
@@ -234,7 +234,7 @@ export async function listReviewCases(user) {
     const rankDiff =
       workflowRank(left.workflow.status) - workflowRank(right.workflow.status);
     if (rankDiff !== 0) return rankDiff;
-    return right.updatedAt.localeCompare(left.updatedAt);
+    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
   });
 }
 
