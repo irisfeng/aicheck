@@ -175,6 +175,17 @@ function computeSummary(items: ReviewItemResult[], overview: string) {
   };
 }
 
+// A rejected fetch() (no HTTP response reached the browser) shows up as a
+// TypeError such as "Failed to fetch" (Chrome) / "Load failed" (Safari) /
+// "NetworkError when attempting to fetch resource" (Firefox). We detect it so
+// the UI can explain the likely cause (CORS / network / dropped connection)
+// instead of leaking the raw browser message.
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /failed to fetch|load failed|networkerror|network error/i.test(message);
+}
+
 async function readApiPayload(response: Response) {
   const contentType = response.headers.get("content-type") || "";
 
@@ -773,16 +784,26 @@ function App() {
     await Promise.all(
       uploads.map(async (target, index) => {
         const file = files[index];
-        const uploadResponse = await fetch(target.uploadUrl, {
-          method: "PUT",
-          headers: {
-            "Content-Type": target.mimeType || file.type || "application/octet-stream",
-          },
-          body: file,
-        });
+        let uploadResponse: Response;
+        try {
+          uploadResponse = await fetch(target.uploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": target.mimeType || file.type || "application/octet-stream",
+            },
+            body: file,
+          });
+        } catch (networkError) {
+          if (isNetworkError(networkError)) {
+            throw new Error(
+              `上传到对象存储失败：${file.name}。请检查 Cloudflare R2 存储桶的跨域(CORS)是否放行当前站点（允许 PUT 方法与 Content-Type 请求头），以及网络是否正常。`,
+            );
+          }
+          throw networkError;
+        }
 
         if (!uploadResponse.ok) {
-          throw new Error(`文件上传失败：${file.name}`);
+          throw new Error(`文件上传失败：${file.name}（HTTP ${uploadResponse.status}）`);
         }
       }),
     );
@@ -1169,9 +1190,15 @@ function App() {
       }
       await refreshCases();
     } catch (submitError) {
-      setError(
-        submitError instanceof Error ? submitError.message : "分析失败，请稍后重试。",
-      );
+      if (isNetworkError(submitError)) {
+        setError(
+          "与服务器的连接中断，分析未能返回结果。常见原因：单次材料过多导致分析超时、或对象存储跨域(CORS)/网络异常。建议每批先传 5 到 8 个关键文件后重试；材料已自动保存，可稍后继续。",
+        );
+      } else {
+        setError(
+          submitError instanceof Error ? submitError.message : "分析失败，请稍后重试。",
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
